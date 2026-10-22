@@ -242,8 +242,9 @@ class MamboTTSApp(QMainWindow):
     def _ensure_davinci_plugin_installed(self):
         """检查并自动安装/更新达芬奇插件脚本至 DaVinci Resolve 脚本目录"""
         base_dir = os.path.dirname(os.path.abspath(__file__))
-        src_plugin = os.path.join(base_dir, "davinci-plugin", "MamboTTS_Resolve.py")
-        if not os.path.exists(src_plugin):
+        src_lua = os.path.join(base_dir, "davinci-plugin", "MamboTTS_Resolve.lua")
+        src_py = os.path.join(base_dir, "davinci-plugin", "MamboTTS_Resolve.py")
+        if not os.path.exists(src_lua) and not os.path.exists(src_py):
             return
 
         davinci_base = os.path.expanduser("~/Library/Application Support/Blackmagic Design/DaVinci Resolve")
@@ -253,9 +254,19 @@ class MamboTTSApp(QMainWindow):
         utility_dir = os.path.join(davinci_base, "Fusion", "Scripts", "Utility")
         try:
             os.makedirs(utility_dir, exist_ok=True)
-            dst_plugin = os.path.join(utility_dir, "MamboTTS_Resolve.py")
-            shutil.copy2(src_plugin, dst_plugin)
-            os.chmod(dst_plugin, 0o755)
+            # 优先部署 Lua 原生引导器，确保无系统级 Python.framework 时 100% 显示在脚本菜单中
+            if os.path.exists(src_lua):
+                dst_lua = os.path.join(utility_dir, "MamboTTS_Resolve.lua")
+                shutil.copy2(src_lua, dst_lua)
+                os.chmod(dst_lua, 0o755)
+
+            # 清理历史 .py 文件，避免缺少 Python.framework 时导致整个菜单判定为 No scripts 或产生重名项
+            old_py = os.path.join(utility_dir, "MamboTTS_Resolve.py")
+            if os.path.exists(old_py):
+                try:
+                    os.remove(old_py)
+                except Exception:
+                    pass
 
             # 写入项目根目录配置，使插件无论在何处运行都能准确定位引擎
             cfg_path = os.path.join(utility_dir, "MamboTTS_config.json")

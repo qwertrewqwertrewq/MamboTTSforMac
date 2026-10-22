@@ -12,12 +12,14 @@ mkdir -p "$TARGET_DIR"
 
 # 清理历史旧版与重复冗余脚本
 rm -f "$TARGET_EDIT_DIR/MamboTTS_Resolve.py" \
+      "$TARGET_EDIT_DIR/MamboTTS_Resolve.lua" \
       "$TARGET_EDIT_DIR/MamboTTS_Voiceover.lua" \
-      "$TARGET_DIR/MamboTTS_Voiceover.lua" 2>/dev/null || true
+      "$TARGET_DIR/MamboTTS_Voiceover.lua" \
+      "$TARGET_DIR/MamboTTS_Resolve.py" 2>/dev/null || true
 
-# 统一安装至 Utility 目录
-cp -f "$DIR/MamboTTS_Resolve.py" "$TARGET_DIR/MamboTTS_Resolve.py"
-chmod +x "$TARGET_DIR/MamboTTS_Resolve.py" "$DIR/MamboTTS_Resolve.py"
+# 统一安装至 Utility 目录 (Lua 原生引导器，100% 保证在未安装系统 Python.framework 的 Mac 上显示)
+cp -f "$DIR/MamboTTS_Resolve.lua" "$TARGET_DIR/MamboTTS_Resolve.lua"
+chmod +x "$TARGET_DIR/MamboTTS_Resolve.lua"
 
 PROJECT_ROOT="$(cd "$DIR/.." && pwd)"
 echo "{\"project_root\": \"$PROJECT_ROOT\"}" > "$TARGET_DIR/MamboTTS_config.json"

@@ -10,7 +10,8 @@ cd "$DIR"
 DAVINCI_DIR="$HOME/Library/Application Support/Blackmagic Design/DaVinci Resolve/Fusion/Scripts/Utility"
 if [ -d "$HOME/Library/Application Support/Blackmagic Design/DaVinci Resolve" ]; then
     mkdir -p "$DAVINCI_DIR"
-    cp -f "davinci-plugin/MamboTTS_Resolve.py" "$DAVINCI_DIR/MamboTTS_Resolve.py" 2>/dev/null || true
+    cp -f "davinci-plugin/MamboTTS_Resolve.lua" "$DAVINCI_DIR/MamboTTS_Resolve.lua" 2>/dev/null || true
+    rm -f "$DAVINCI_DIR/MamboTTS_Resolve.py" 2>/dev/null || true
     echo "{\"project_root\": \"$DIR\"}" > "$DAVINCI_DIR/MamboTTS_config.json" 2>/dev/null || true
     echo "$DIR" > "$HOME/.mambotts_root" 2>/dev/null || true
 fi
