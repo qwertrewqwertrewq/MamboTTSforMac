@@ -105,7 +105,7 @@ STATUS_SYMBOL = {
     "ok": "●",
     "busy": "◐",
     "warn": "▲",
-    "error": "✕",
+    "error": "[X]",
     "info": "○",
 }
 
@@ -387,7 +387,7 @@ def status_style(kind: str) -> str:
     - ok    绿色 ● 前缀 + 亮字
     - busy  灰白 ◐ 前缀
     - warn  中灰 ▲ 前缀
-    - error 红色 ✕ 前缀 + 亮字（错误文字红，不用整行反白）
+    - error 红色 [X] 前缀 + 亮字（错误文字红，不用整行反白）
     - info  暗灰 ○ 前缀
     实际状态文本由调用方拼符号，这里只给颜色/字重。
     """

@@ -4,10 +4,13 @@ __pycache__/
 *.pyo
 *.pyd
 .venv/
+.venv_engine/
 venv/
 
-# GPT-SoVITS 整合包（运行时自动下载，8GB+）
+# GPT-SoVITS 源码与整合包
 GPT-SoVITS/
+models/*.ckpt
+models/*.pth
 
 # 运行时产物
 engine_temp/
@@ -16,6 +19,13 @@ config.json
 
 # 打包产物
 *.zip
+*.tar.gz*
+manifest.json
+
+# 云端部署与工具
+.wrangler/
+node_modules/
+upload_all_parts.py
 
 # IDE / 编辑器
 .vscode/

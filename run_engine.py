@@ -11,16 +11,31 @@ from engine_contract import (
 def _project_dir():
     return os.path.dirname(os.path.abspath(__file__))
 
+# 优先加载项目内置的 nltk_data
+_local_nltk = os.path.join(_project_dir(), "GPT-SoVITS", "nltk_data")
+if os.path.exists(_local_nltk):
+    os.environ["NLTK_DATA"] = _local_nltk + ":" + os.environ.get("NLTK_DATA", "")
+
 
 def engine_paths(base=None):
     """集中返回引擎与模型文件路径，install_engine 生成 bat 时也复用同一清单。"""
     base = base or _project_dir()
     gsv_dir = os.path.join(base, "GPT-SoVITS")
     models_dir = os.path.join(base, "models")
+    
+    python_candidates = [
+        os.path.join(base, ".venv_engine", "bin", "python"),
+        os.path.join(base, ".venv_engine", "Scripts", "python.exe"),
+        os.path.join(gsv_dir, "runtime", "bin", "python"),
+        os.path.join(gsv_dir, "runtime", "python.exe"),
+        sys.executable,
+    ]
+    python_exe = next((p for p in python_candidates if os.path.exists(p)), python_candidates[0])
+
     return {
         "gsv_dir": gsv_dir,
         "models_dir": models_dir,
-        "python_exe": os.path.join(gsv_dir, "runtime", "python.exe"),
+        "python_exe": python_exe,
         "api_py": os.path.join(gsv_dir, "api.py"),
         "sovits": os.path.join(models_dir, SOVITS_MODEL),
         "gpt": os.path.join(models_dir, GPT_MODEL),
@@ -33,9 +48,9 @@ def preflight_check(base=None):
     避免半安装状态下静默卡 60 秒后报「启动超时」，让人摸不着头脑。"""
     p = engine_paths(base)
     required = [
-        ("GPT-SoVITS 整合包目录", p["gsv_dir"]),
+        ("GPT-SoVITS 目录", p["gsv_dir"]),
         ("引擎入口 api.py", p["api_py"]),
-        ("内置 Python runtime", p["python_exe"]),
+        ("Python 运行环境", p["python_exe"]),
         ("SoVITS 模型", p["sovits"]),
         ("GPT 模型", p["gpt"]),
         ("参考音频", p["ref_wav"]),
@@ -94,7 +109,7 @@ def main():
 
     # 在 GPT-SoVITS 目录下运行 API，保证工作目录正确
     try:
-        proc = subprocess.Popen(cmd, cwd=p["gsv_dir"])
+        proc = subprocess.Popen(cmd, cwd=p["gsv_dir"], stdin=subprocess.DEVNULL)
         proc.wait()
     except KeyboardInterrupt:
         print("\n[状态] 推理服务已关闭。")

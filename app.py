@@ -15,7 +15,7 @@ from PySide6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout,
                              QMessageBox, QSlider, QScrollArea, QProgressDialog)
 from PySide6.QtCore import Qt, QUrl, Signal, QTimer
 from PySide6.QtGui import QKeySequence, QShortcut, QPixmap, QPainter, QFont, QColor, QIcon
-from PySide6.QtMultimedia import QMediaPlayer, QAudioOutput
+from PySide6.QtMultimedia import QMediaPlayer, QAudioOutput, QMediaDevices
 
 # 导入推理客户端与共用模块（主题/文件命名/配置/历史组件均已解耦）
 from inference import TTSClient
@@ -112,8 +112,9 @@ class MamboTTSApp(QMainWindow):
         self._action_status_kind = "info"
 
         # 音频播放器初始化
-        self.player = QMediaPlayer()
-        self.audio_output = QAudioOutput()
+        self.audio_output = QAudioOutput(self)
+        self.audio_output.setVolume(0.8)
+        self.player = QMediaPlayer(self)
         self.player.setAudioOutput(self.audio_output)
         # 播放器与历史记录状态
         self._last_synth_text = ""
@@ -256,7 +257,7 @@ class MamboTTSApp(QMainWindow):
             self._engine_installed = False
             self._engine_timeout_logged = True  # 无需再走超时分支
             self.log_line.emit("ERROR", "GPT-SoVITS 未安装，请先运行 MamboTTS.bat 完成一键安装。")
-            self._set_engine_status("error", "✕ 未安装引擎")
+            self._set_engine_status("error", "[失败] 未安装引擎")
             self._set_action_status("error", "请先运行 MamboTTS.bat 安装引擎（约 8GB，一次性）")
             self.btn_generate.setToolTip("请先运行 MamboTTS.bat 安装引擎")
             # 当前窗口内直接给安装入口（launcher 未拦截到的调试路径也能自救）
@@ -275,9 +276,11 @@ class MamboTTSApp(QMainWindow):
                 creation_flags |= subprocess.CREATE_NEW_PROCESS_GROUP
             self.engine_proc = subprocess.Popen(
                 [sys.executable, run_engine_path],
+                stdin=subprocess.DEVNULL,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,
                 creationflags=creation_flags,
+                start_new_session=(sys.platform != "win32"),
                 bufsize=1,
                 universal_newlines=True,
                 encoding="utf-8",
@@ -444,7 +447,7 @@ class MamboTTSApp(QMainWindow):
             if not self._engine_timeout_logged:
                 self._engine_timeout_logged = True
                 self.log_line.emit("ERROR", f"引擎进程已退出 (code={self.engine_proc.returncode})，请查看日志面板定位原因。")
-                self._set_engine_status("error", "✕ 引擎启动失败")
+                self._set_engine_status("error", "[失败] 引擎启动失败")
                 self._set_action_status("error", "引擎进程退出，详见「运行日志」面板")
                 self.btn_engine_retry.setVisible(True)
                 self._api_check_timer.setInterval(5000)  # 保留轮询，外部手动起引擎时能自动恢复
@@ -454,7 +457,7 @@ class MamboTTSApp(QMainWindow):
         if elapsed > 60 and not self._engine_timeout_logged:
             self._engine_timeout_logged = True
             self.log_line.emit("ERROR", "引擎启动超过 60 秒仍未就绪。将继续在后台检测；若模型已就位可稍候，或查看日志排查。")
-            self._set_engine_status("error", "✕ 引擎启动超时")
+            self._set_engine_status("error", "[失败] 引擎启动超时")
             self._set_action_status("error", "仍在后台检测引擎状态；可查看运行日志排查，或重新启动客户端")
             self.btn_engine_retry.setVisible(True)
             self._api_check_timer.setInterval(5000)
@@ -467,7 +470,7 @@ class MamboTTSApp(QMainWindow):
         elif not self._engine_timeout_logged:
             self._engine_timeout_logged = True
             self.log_line.emit("ERROR", "引擎未运行且本地无可用启动器，请通过 MamboTTS.bat 启动或检查 run_engine.py。")
-            self._set_engine_status("error", "✕ 引擎启动器缺失")
+            self._set_engine_status("error", "[失败] 引擎启动器缺失")
             self._api_check_timer.setInterval(5000)
 
     def _poll_engine_status(self):
@@ -881,7 +884,7 @@ class MamboTTSApp(QMainWindow):
         # int 比较兼容不同 PySide6 的枚举 scoping（NoError 恒为 0）
         if int(error) == 0:
             return
-        self._set_action_status("error", "✕ 播放失败（文件损坏或系统缺少解码器），请重新合成或另选音频")
+        self._set_action_status("error", "[失败] 播放失败（文件损坏或系统缺少解码器），请重新合成或另选音频")
         self.append_log("ERROR", f"音频播放错误：{error}")
         # 不禁用按钮：用户可点其它历史/重新合成后重试（_play_path 会重新 setSource）
         self.btn_play_pause.setText("▶")
@@ -1064,10 +1067,16 @@ class MamboTTSApp(QMainWindow):
     def _terminate_engine_tree(self, pid):
         """按进程树终止引擎子进程及其所有派生进程（含孙子进程 api.py）。
 
-        Windows 用 taskkill /T /F <pid>；非 Windows 由调用方 terminate 兜底。
+        Windows 用 taskkill /T /F <pid>；Unix 用 killpg 发送 SIGTERM。
         静默处理失败，由调用方兜底。
         """
         if sys.platform != "win32":
+            try:
+                import signal
+                pgid = os.getpgid(pid)
+                os.killpg(pgid, signal.SIGTERM)
+            except Exception:
+                pass
             return
         try:
             subprocess.run(
@@ -1097,7 +1106,7 @@ class MamboTTSApp(QMainWindow):
     def generate_voice(self):
         text = self.text_input.toPlainText().strip()
         if not text:
-            self._set_action_status("error", "✕ 请输入配音文案")
+            self._set_action_status("error", "[失败] 请输入配音文案")
             return
 
         # 防止重复点击：合成进行中再次点击直接忽略。
@@ -1195,7 +1204,7 @@ class MamboTTSApp(QMainWindow):
         self.name_input.setToolTip("")
 
         if success:
-            self._set_action_status("ok", "✓ 合成成功")
+            self._set_action_status("ok", "[成功] 合成成功")
             self.append_log("INFO", message)
             # 合成成功后自动添加到历史记录并启用播放按钮
             self._add_to_history(save_path, self._last_synth_text)
@@ -1204,7 +1213,7 @@ class MamboTTSApp(QMainWindow):
         else:
             # 失败首行摘要直接进状态栏，长日志里翻找原因对新手不友好
             first_line = message.splitlines()[0][:60] if message else "未知错误"
-            self._set_action_status("error", f"✕ 合成失败：{first_line}（详见日志）")
+            self._set_action_status("error", f"[失败] 合成失败：{first_line}（详见日志）")
             # 把具体的错误原因显示在日志面板，让用户能自助排查
             self.append_log("ERROR", f"合成失败：{message}")
 
@@ -1214,22 +1223,38 @@ class MamboTTSApp(QMainWindow):
         if os.path.exists(save_path):
             self._play_path(save_path)
         else:
-            self._set_action_status("error", "✕ 未找到音频文件")
+            self._set_action_status("error", "[失败] 未找到音频文件")
 
     # ============ 播放器控制 ============
 
     def _play_path(self, path):
-        """加载并播放指定路径的音频"""
-        if not os.path.exists(path):
-            self._set_action_status("error", "✕ 未找到音频文件")
+        """加载并播放指定路径的音频（优先锁定 AirPods/耳机设备，防止扬声器外放）"""
+        if not path or not os.path.exists(path):
+            self._set_action_status("error", "[失败] 未找到音频文件")
             return
+
+        # 探测当前可用音频输出设备
+        devs = QMediaDevices.audioOutputs()
+        # 优先匹配 AirPods 或其它耳机设备
+        airpods_dev = next((d for d in devs if "airpods" in d.description().lower()), None)
+        headphone_dev = next((d for d in devs if any(k in d.description().lower() for k in ("headphone", "earphone", "buds"))), None)
+
+        target_dev = airpods_dev or headphone_dev or QMediaDevices.defaultAudioOutput()
+        dev_desc = target_dev.description() if target_dev else "默认设备"
+
+        if target_dev:
+            self.audio_output.setDevice(target_dev)
+        self.audio_output.setVolume(0.8)
+        self.audio_output.setMuted(False)
+        self.append_log("INFO", f"播放设备已锁定: {dev_desc} (音量 80%)")
+
         self.player_bar.setVisible(True)  # 有音频了，播放条出现
         self.player.setSource(QUrl.fromLocalFile(path))
         self.player.play()
         self.btn_play_pause.setEnabled(True)
         self.btn_play_pause.setText("❚❚")
         self.seek_slider.setEnabled(True)
-        self._set_action_status("ok", "● 正在播放")
+        self._set_action_status("ok", f"● 正在播放 [{dev_desc}]")
 
     def toggle_playback(self):
         """播放/暂停切换"""
@@ -1509,11 +1534,11 @@ class MamboTTSApp(QMainWindow):
         save_path = self.path_input.text().strip()
         folder_path = os.path.dirname(save_path)
         if not folder_path:
-            self._set_action_status("error", "✕ 保存路径为空，无法打开目录")
+            self._set_action_status("error", "[失败] 保存路径为空，无法打开目录")
             self.append_log("WARNING", "保存路径为空，无法打开目录。")
             return
         if not os.path.exists(folder_path):
-            self._set_action_status("error", f"✕ 目录不存在：{folder_path}")
+            self._set_action_status("error", f"[失败] 目录不存在：{folder_path}")
             self.append_log("WARNING", f"目录不存在：{folder_path}")
             return
         try:
@@ -1532,7 +1557,7 @@ class MamboTTSApp(QMainWindow):
             else:
                 subprocess.Popen(["xdg-open", folder_path])
         except Exception as e:
-            self._set_action_status("error", "✕ 打开目录失败，详见日志")
+            self._set_action_status("error", "[失败] 打开目录失败，详见日志")
             self.append_log("ERROR", f"打开目录失败：{e}")
 
 if __name__ == "__main__":

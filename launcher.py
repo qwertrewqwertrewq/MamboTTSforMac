@@ -46,12 +46,26 @@ def is_installed():
     base = _project_dir()
     gsv_dir = os.path.join(base, "GPT-SoVITS")
     api_py = os.path.join(gsv_dir, "api.py")
-    runtime_python = os.path.join(gsv_dir, "runtime", "python.exe")
-    if not (os.path.exists(api_py) and os.path.exists(runtime_python)):
+    if not os.path.exists(api_py):
         return False
+    
+    # 检查是否有可用的 Python runtime（Mac 下使用 .venv_engine，Windows 下使用 runtime/python.exe）
+    engine_pythons = [
+        os.path.join(base, ".venv_engine", "bin", "python"),
+        os.path.join(base, ".venv_engine", "Scripts", "python.exe"),
+        os.path.join(gsv_dir, "runtime", "bin", "python"),
+        os.path.join(gsv_dir, "runtime", "python.exe"),
+    ]
+    has_runtime = any(os.path.exists(p) for p in engine_pythons)
+    if not has_runtime:
+        return False
+
     if os.path.exists(os.path.join(gsv_dir, INSTALL_MARKER)):
         return True
-    # 老安装（标记机制引入前完成）：用 runtime 内 torch 目录作为完整性代理
+    
+    # 检查 torch 是否存在
+    if os.path.exists(os.path.join(base, ".venv_engine")):
+        return True
     torch_dir = os.path.join(gsv_dir, "runtime", "Lib", "site-packages", "torch")
     return os.path.isdir(torch_dir)
 
@@ -361,7 +375,7 @@ class InstallerWindow(QWidget):
     def on_finished(self, success, message):
         self._cancel_requested = False
         if success:
-            self.stage_label.setText("✓ 安装完成")
+            self.stage_label.setText("安装完成")
             self.stage_label.setStyleSheet(
                 f"font-size: 13px; font-weight: 700; color: {THEME['text']};")
             self.btn_install.setText("完成")
@@ -375,7 +389,7 @@ class InstallerWindow(QWidget):
             # 取消判定走显式标志而非字符串猜测：install() 各阶段取消时的
             # 返回文案并非都以「已取消」开头，字符串匹配会把取消误报成失败
             cancelled = self._worker is not None and self._worker.is_cancel_requested()
-            self.stage_label.setText("已取消" if cancelled else "✕ 安装失败")
+            self.stage_label.setText("已取消" if cancelled else "安装失败")
             # 反白（白底黑字）只给错误；取消用灰字
             self.stage_label.setStyleSheet(
                 f"font-size: 13px; font-weight: 700; color: {THEME['accent_text']};"
@@ -432,7 +446,7 @@ class InstallerWindow(QWidget):
                     "已请求取消，正在等待安装线程收尾（通常数秒内）。\n"
                     "再点一次「退出」将立即强制终止。"
                 )
-                self.btn_close.setText("⚠ 再点一次「退出」立即强制终止")
+                self.btn_close.setText("再点一次「退出」立即强制终止")
                 event.ignore()
                 return
             # 第 3 次：强制退出

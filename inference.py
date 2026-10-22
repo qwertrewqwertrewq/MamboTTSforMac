@@ -208,7 +208,6 @@ class TTSClient:
                         except OSError:
                             pass
                         return False, "引擎返回了无效音频数据（状态码 200）。\n请查看引擎日志排查模型/参考音频配置。"
-                    self._log("INFO", f"语音合成成功，已保存至: {save_path}")
                     return True, f"语音合成成功，已保存至: {save_path}"
                 else:
                     # 把后端返回的错误体也带给用户，便于排查

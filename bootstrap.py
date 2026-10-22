@@ -44,11 +44,22 @@ def _project_dir():
 
 def _venv_python():
     base = _project_dir()
-    return os.path.join(base, ".venv", "Scripts", "python.exe")
+    mac_runtime = os.path.join(base, "GPT-SoVITS", "runtime", "bin", "python")
+    if os.path.exists(mac_runtime):
+        return mac_runtime
+    if sys.platform == "win32":
+        return os.path.join(base, ".venv", "Scripts", "python.exe")
+    return os.path.join(base, ".venv", "bin", "python")
 
 
 def _venv_ready():
-    return os.path.exists(_venv_python())
+    p = _venv_python()
+    if not os.path.exists(p):
+        return False
+    # 若已有独立 runtime，直接判定就绪
+    if "GPT-SoVITS" in p:
+        return True
+    return os.path.exists(p)
 
 
 def _python_cmd_if_ok(cmd):
@@ -72,7 +83,7 @@ def _system_python():
     根本没有 3.8/3.9 的 wheel——不预检会一路走完 venv 创建，到 pip
     装依赖才报晦涩错误。默认 python/py 版本不够时，再枚举 py 启动器
     管理的多版本（py -0p），避免「装了 3.11 但默认是 3.9」的机器被误判。"""
-    for cmd in ("py", "python"):
+    for cmd in ("python3", "python", "py"):
         ok = _python_cmd_if_ok(cmd)
         if ok:
             return ok
@@ -694,14 +705,15 @@ def _spawn_launcher(venv_python, launcher_path):
     返回 True=正常运行；False=立即退出（调用方决定如何提示）。
     """
     err_log = os.path.join(_project_dir(), "launcher_error.log")
-    creation_flags = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
+    creation_flags = getattr(subprocess, "CREATE_NO_WINDOW", 0) if sys.platform == "win32" else 0
+    popen_kwargs = {"creationflags": creation_flags} if sys.platform == "win32" else {}
     try:
         with open(err_log, "wb") as errf:
             proc = subprocess.Popen(
                 [venv_python, launcher_path],
                 stdout=errf,
                 stderr=subprocess.STDOUT,
-                creationflags=creation_flags,
+                **popen_kwargs,
             )
             time.sleep(2.0)
             return proc.poll() is None

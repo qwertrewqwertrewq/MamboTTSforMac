@@ -506,7 +506,7 @@ def install(progress_cb=None, log_cb=None, state_cb=None, gpu_type="nvidia50", c
                 except OSError:
                     pass
                 return False, "文件校验失败，缓存已清理，请重新运行。"
-            log_cb("[状态] 文件校验通过 ✓")
+            log_cb("[状态] 文件校验通过 [成功]")
         else:
             # 理论上不会走到：GPU_PACKAGES 都带 sha256。留着兜底记录哈希
             log_cb(f"[提示] 本次整合包 SHA256: {actual}（请回填到 GPU_PACKAGES 的 sha256 以启用校验）")
@@ -652,7 +652,7 @@ def install(progress_cb=None, log_cb=None, state_cb=None, gpu_type="nvidia50", c
 
         progress_cb(1.0)  # 全部完成
         log_cb("===================================================")
-        log_cb("🎉 恭喜！GPT-SoVITS 本地 GPU 推理引擎一键安装成功！")
+        log_cb(" 恭喜！GPT-SoVITS 本地 GPU 推理引擎一键安装成功！")
         log_cb("===================================================")
         log_cb(f"安装路径: {extract_dir}")
         log_cb("接下来请启动 MamboTTS 客户端即可开始配音。")
