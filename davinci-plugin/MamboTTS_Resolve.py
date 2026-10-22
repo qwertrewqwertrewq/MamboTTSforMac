@@ -155,24 +155,29 @@ def get_project_root():
 
 
 def start_local_engine():
-    """在后台静默拉起本地 MamboTTS 引擎"""
+    """在后台拉起本地 MamboTTS 主客户端与推理引擎"""
     project_root = get_project_root()
     engine_py = os.path.join(project_root, "GPT-SoVITS", "runtime", "bin", "python")
+    if not os.path.exists(engine_py):
+        engine_py = sys.executable
+
+    launcher_script = os.path.join(project_root, "launcher.py")
     run_engine_script = os.path.join(project_root, "run_engine.py")
 
-    if not os.path.exists(engine_py) or not os.path.exists(run_engine_script):
-        return False, "未找到引擎启动脚本，请先手动运行主客户端 MamboTTS.command"
+    target_script = launcher_script if os.path.exists(launcher_script) else run_engine_script
+    if not os.path.exists(target_script):
+        return False, "未找到启动脚本，请先手动运行主客户端 MamboTTS.command"
 
     try:
         subprocess.Popen(
-            [engine_py, run_engine_script],
+            [engine_py, target_script],
             cwd=project_root,
             stdin=subprocess.DEVNULL,
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
             start_new_session=True,
         )
-        return True, "正在启动引擎..."
+        return True, "正在唤醒主客户端与引擎..."
     except Exception as e:
         return False, str(e)
 
@@ -631,7 +636,17 @@ def run_gui():
             engine_label.Text = "<font color='#EF4444'><b>[离线] MamboTTS 引擎未启动</b></font>"
             start_engine_btn.Visible = True
             generate_btn.Enabled = False
-            log("提示：MamboTTS 引擎离线，请点击「启动引擎」或手动启动 MamboTTS.command")
+            log("提示：MamboTTS 引擎离线，请点击「启动引擎」或运行主客户端 MamboTTS.command")
+
+            # 若主客户端完全未运行，自动在后台尝试唤醒一次
+            try:
+                proc_out = subprocess.check_output(["pgrep", "-f", "launcher\\.py|app\\.py"]).decode().strip()
+            except Exception:
+                proc_out = ""
+            if not proc_out:
+                log("[提示] 检测到 MamboTTS 主客户端尚未启动，正在后台自动唤醒...")
+                start_local_engine()
+                engine_label.Text = "<font color='#F59E0B'><b>[启动中] 正在唤醒主客户端与引擎...</b></font>"
 
     # 绑定事件
     def on_auto_trim_toggled(ev):

@@ -23,5 +23,14 @@ else
     exit 1
 fi
 
-# 3. 启动应用主界面
+# 3. 自动同步达芬奇 (DaVinci Resolve) 插件与配置
+DAVINCI_DIR="$HOME/Library/Application Support/Blackmagic Design/DaVinci Resolve/Fusion/Scripts/Utility"
+if [ -d "$HOME/Library/Application Support/Blackmagic Design/DaVinci Resolve" ]; then
+    mkdir -p "$DAVINCI_DIR"
+    cp -f "$DIR/davinci-plugin/MamboTTS_Resolve.py" "$DAVINCI_DIR/MamboTTS_Resolve.py" 2>/dev/null || true
+    echo "{\"project_root\": \"$DIR\"}" > "$DAVINCI_DIR/MamboTTS_config.json" 2>/dev/null || true
+    echo "$DIR" > "$HOME/.mambotts_root" 2>/dev/null || true
+fi
+
+# 4. 启动应用主界面
 "$PYTHON_CMD" launcher.py "$@"

@@ -1,5 +1,6 @@
 import os
 import sys
+import json
 import re
 import wave
 import shutil
@@ -171,6 +172,9 @@ class MamboTTSApp(QMainWindow):
         # 恢复上次会话的合成历史（文件仍存在的有效条目）
         self._load_history()
 
+        # 自动同步达芬奇插件至 DaVinci Resolve 脚本目录
+        QTimer.singleShot(500, self._ensure_davinci_plugin_installed)
+
         # 启动 3 秒后后台检查 GitHub 是否有新版本（非阻塞，失败静默）
         QTimer.singleShot(3000, self._check_for_updates_async)
 
@@ -232,6 +236,92 @@ class MamboTTSApp(QMainWindow):
         )
         if reply == QMessageBox.Yes and release_url:
             webbrowser.open(release_url)
+
+    # ============ 达芬奇 (DaVinci Resolve) 插件集成 ============
+
+    def _ensure_davinci_plugin_installed(self):
+        """检查并自动安装/更新达芬奇插件脚本至 DaVinci Resolve 脚本目录"""
+        base_dir = os.path.dirname(os.path.abspath(__file__))
+        src_plugin = os.path.join(base_dir, "davinci-plugin", "MamboTTS_Resolve.py")
+        if not os.path.exists(src_plugin):
+            return
+
+        davinci_base = os.path.expanduser("~/Library/Application Support/Blackmagic Design/DaVinci Resolve")
+        if not os.path.exists(davinci_base):
+            return
+
+        utility_dir = os.path.join(davinci_base, "Fusion", "Scripts", "Utility")
+        try:
+            os.makedirs(utility_dir, exist_ok=True)
+            dst_plugin = os.path.join(utility_dir, "MamboTTS_Resolve.py")
+            shutil.copy2(src_plugin, dst_plugin)
+            os.chmod(dst_plugin, 0o755)
+
+            # 写入项目根目录配置，使插件无论在何处运行都能准确定位引擎
+            cfg_path = os.path.join(utility_dir, "MamboTTS_config.json")
+            with open(cfg_path, "w", encoding="utf-8") as f:
+                json.dump({"project_root": base_dir}, f)
+
+            root_path = os.path.expanduser("~/.mambotts_root")
+            with open(root_path, "w", encoding="utf-8") as f:
+                f.write(base_dir)
+
+            self.log_line.emit("INFO", "[达芬奇插件] 已自动就绪。可在顶部菜单【工作区 -> 脚本 -> Utility -> MamboTTS_Resolve】直接使用。")
+        except Exception as e:
+            self.log_line.emit("WARNING", f"[达芬奇插件] 同步脚本失败: {e}")
+
+    def open_davinci_plugin(self):
+        """从主界面一键唤起达芬奇配音助手交互窗口"""
+        base_dir = os.path.dirname(os.path.abspath(__file__))
+        plugin_script = os.path.join(base_dir, "davinci-plugin", "MamboTTS_Resolve.py")
+        if not os.path.exists(plugin_script):
+            QMessageBox.warning(self, "未找到插件", "未找到达芬奇插件脚本 davinci-plugin/MamboTTS_Resolve.py")
+            return
+
+        # 确保已同步安装
+        self._ensure_davinci_plugin_installed()
+
+        # 检测 DaVinci Resolve 是否运行
+        is_resolve_running = False
+        try:
+            out = subprocess.check_output(["pgrep", "-i", "resolve"]).decode().strip()
+            if out:
+                is_resolve_running = True
+        except Exception:
+            is_resolve_running = False
+
+        if not is_resolve_running:
+            QMessageBox.information(
+                self,
+                "达芬奇配音助手",
+                "未检测到 DaVinci Resolve (达芬奇) 正在运行。\n\n"
+                "使用方式：\n"
+                "1. 请先启动 DaVinci Resolve 并打开剪辑时间线；\n"
+                "2. 再次点击此处的「唤起达芬奇插件」即可直接呼出交互窗口；\n"
+                "3. 亦可在达芬奇顶部菜单【工作区 -> 脚本 -> Utility -> MamboTTS_Resolve】直接使用。"
+            )
+            return
+
+        try:
+            cmd = [sys.executable, plugin_script]
+            env = os.environ.copy()
+            env["RESOLVE_SCRIPT_API"] = "/Library/Application Support/Blackmagic Design/DaVinci Resolve/Developer/Scripting"
+            env["RESOLVE_SCRIPT_LIB"] = "/Applications/DaVinci Resolve/DaVinci Resolve.app/Contents/Libraries/Fusion/fusionscript.so"
+            env["PYTHONPATH"] = env.get("PYTHONPATH", "") + ":/Library/Application Support/Blackmagic Design/DaVinci Resolve/Developer/Scripting/Modules/"
+
+            subprocess.Popen(
+                cmd,
+                cwd=base_dir,
+                env=env,
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                start_new_session=True,
+            )
+            self.log_line.emit("INFO", "[达芬奇] 已成功呼出达芬奇配音助手交互窗口。")
+        except Exception as e:
+            self.log_line.emit("ERROR", f"[达芬奇] 呼出插件失败: {e}")
+            QMessageBox.critical(self, "错误", f"呼出达芬奇插件失败: {e}")
 
     # ============ 引擎子进程管理 ============
 
@@ -590,6 +680,16 @@ class MamboTTSApp(QMainWindow):
         header_left.addWidget(header_subtitle)
         header_layout.addLayout(header_left)
         header_layout.addStretch()
+
+        # 达芬奇配音插件唤起按钮
+        self.btn_davinci = QPushButton("唤起达芬奇插件")
+        self.btn_davinci.setObjectName("SecondaryBtn")
+        self.btn_davinci.setFixedHeight(30)
+        self.btn_davinci.setCursor(Qt.PointingHandCursor)
+        self.btn_davinci.setToolTip("在 DaVinci Resolve 达芬奇剪辑中唤起可视化配音助手")
+        self.btn_davinci.clicked.connect(self.open_davinci_plugin)
+        header_layout.addWidget(self.btn_davinci, 0, Qt.AlignVCenter)
+
         # 主题切换按钮：深色/浅色一键互换（状态持久化到 config）
         self.btn_theme = QPushButton()
         self.btn_theme.setObjectName("ThemeBtn")
