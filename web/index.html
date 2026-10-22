@@ -477,7 +477,7 @@
                     <li><strong>达芬奇 (DaVinci Resolve) 官方脚本原生接入</strong>：基于 Fusion Scripting API 打造可视化界面，直接读取工程时间线中的字幕或 Text+ 轨道，自动合成并精确排布回时间线。</li>
                     <li><strong>音频尾部多余空白截除</strong>：消除 TTS 模型常见的 0.3~0.5s 尾部停顿，通过动态振幅分析截除静音并平滑淡出，极大提升短视频口播的紧凑度。</li>
                     <li><strong>轨道自动裁剪与对齐</strong>：支持一键将文本轨裁切至与生成音频等长，支持左对齐与右对齐切换，重叠音频自动覆盖或独立新建轨道。</li>
-                    <li><strong>零配置一键安装</strong>：集成 Cloudflare R2 极速分卷分发与 SHA256 自校验机制，运行一键安装脚本即可自动就绪模型与环境。</li>
+                    <li><strong>零配置一键安装</strong>：集成 Cloudflare R2 极速分卷分发与全链路单分片 SHA256 实时自校验机制，断点重试时自动识别并修复残缺片段，杜绝因网络中断导致的残片误判。</li>
                 </ul>
             </div>
         </section>
