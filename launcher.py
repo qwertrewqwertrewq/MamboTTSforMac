@@ -63,11 +63,19 @@ def is_installed():
     if os.path.exists(os.path.join(gsv_dir, INSTALL_MARKER)):
         return True
     
-    # 检查 torch 是否存在
+    # 检查 torch 是否存在（兼容 Mac 与 Windows 目录结构）
     if os.path.exists(os.path.join(base, ".venv_engine")):
         return True
-    torch_dir = os.path.join(gsv_dir, "runtime", "Lib", "site-packages", "torch")
-    return os.path.isdir(torch_dir)
+    
+    # Windows: runtime/Lib/site-packages/torch
+    if os.path.isdir(os.path.join(gsv_dir, "runtime", "Lib", "site-packages", "torch")):
+        return True
+    # Mac / Linux: runtime/lib/python3.x/site-packages/torch
+    import glob
+    if glob.glob(os.path.join(gsv_dir, "runtime", "lib", "python*", "site-packages", "torch")):
+        return True
+
+    return False
 
 
 # ============================================================

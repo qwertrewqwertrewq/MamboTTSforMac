@@ -109,21 +109,54 @@ def is_engine_online(api_url=DEFAULT_API_URL):
     return False
 
 
+def get_project_root():
+    """获取 MamboTTS 项目根目录"""
+    # 1. 尝试直接从当前脚本所在目录向上查找 (适用于从工程目录直接运行)
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    cand_root = os.path.dirname(script_dir)
+    if os.path.exists(os.path.join(cand_root, "run_engine.py")):
+        return cand_root
+
+    # 2. 尝试从同级配置文件 MamboTTS_config.json 读取
+    config_file = os.path.join(script_dir, "MamboTTS_config.json")
+    if os.path.exists(config_file):
+        try:
+            with open(config_file, "r", encoding="utf-8") as f:
+                cfg = json.load(f)
+                root = cfg.get("project_root", "")
+                if root and os.path.exists(os.path.join(root, "run_engine.py")):
+                    return root
+        except Exception:
+            pass
+
+    # 3. 尝试从用户全局配置 ~/.mambotts_root 读取
+    root_file = os.path.expanduser("~/.mambotts_root")
+    if os.path.exists(root_file):
+        try:
+            with open(root_file, "r", encoding="utf-8") as f:
+                root = f.read().strip()
+                if root and os.path.exists(os.path.join(root, "run_engine.py")):
+                    return root
+        except Exception:
+            pass
+
+    # 4. 常见候选路径兜底
+    for cand in [
+        os.path.expanduser("~/Coding/manboo"),
+        os.path.expanduser("~/MamboTTS"),
+        os.path.expanduser("~/Documents/MamboTTS"),
+        os.path.expanduser("~/Downloads/MamboTTSforMac"),
+        os.path.expanduser("~/MamboTTSforMac"),
+    ]:
+        if os.path.exists(os.path.join(cand, "run_engine.py")):
+            return cand
+
+    return cand_root
+
+
 def start_local_engine():
     """在后台静默拉起本地 MamboTTS 引擎"""
-    script_dir = os.path.dirname(os.path.abspath(__file__))
-    project_root = os.path.dirname(script_dir)  # 从 davinci-plugin 向上找根目录
-    if not os.path.exists(os.path.join(project_root, "run_engine.py")):
-        # 如果是安装在 ~/Library/... 下，尝试按已知路径查找
-        for cand in [
-            os.path.expanduser("~/Coding/manboo"),
-            os.path.expanduser("~/MamboTTS"),
-            os.path.expanduser("~/Documents/MamboTTS"),
-        ]:
-            if os.path.exists(os.path.join(cand, "run_engine.py")):
-                project_root = cand
-                break
-
+    project_root = get_project_root()
     engine_py = os.path.join(project_root, "GPT-SoVITS", "runtime", "bin", "python")
     run_engine_script = os.path.join(project_root, "run_engine.py")
 

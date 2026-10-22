@@ -76,11 +76,16 @@ DAVINCI_SCRIPT_DIR="$HOME/Library/Application Support/Blackmagic Design/DaVinci 
 if [ -d "$HOME/Library/Application Support/Blackmagic Design/DaVinci Resolve" ]; then
     mkdir -p "$DAVINCI_SCRIPT_DIR"
     cp -f "$DIR/davinci-plugin/MamboTTS_Resolve.py" "$DAVINCI_SCRIPT_DIR/MamboTTS_Resolve.py"
+    echo "{\"project_root\": \"$DIR\"}" > "$DAVINCI_SCRIPT_DIR/MamboTTS_config.json"
+    echo "$DIR" > "$HOME/.mambotts_root"
     echo -e "${GREEN}[成功] 已自动安装达芬奇脚本至: ${DAVINCI_SCRIPT_DIR}/MamboTTS_Resolve.py${RESET}"
     echo -e "${YELLOW}  (在达芬奇顶部菜单: 工作区 -> 脚本 -> Utility -> MamboTTS_Resolve 即可直接呼出)${RESET}"
 else
     echo -e "${YELLOW}未检测到达芬奇安装目录，若后续安装达芬奇，可直接运行 davinci-plugin/install_davinci_plugin.sh${RESET}"
 fi
+
+# 确保安装标记文件存在，避免平台差异导致的重复检测
+touch "$DIR/GPT-SoVITS/.mambo_install_ok" 2>/dev/null || true
 
 # 3. 赋予运行权限
 chmod +x run.sh MamboTTS.command MamboTTS_DaVinci.command davinci-plugin/install_davinci_plugin.sh 2>/dev/null || true

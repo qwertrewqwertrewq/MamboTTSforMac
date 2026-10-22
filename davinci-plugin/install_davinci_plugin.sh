@@ -19,6 +19,10 @@ rm -f "$TARGET_EDIT_DIR/MamboTTS_Resolve.py" \
 cp -f "$DIR/MamboTTS_Resolve.py" "$TARGET_DIR/MamboTTS_Resolve.py"
 chmod +x "$TARGET_DIR/MamboTTS_Resolve.py" "$DIR/MamboTTS_Resolve.py"
 
+PROJECT_ROOT="$(cd "$DIR/.." && pwd)"
+echo "{\"project_root\": \"$PROJECT_ROOT\"}" > "$TARGET_DIR/MamboTTS_config.json"
+echo "$PROJECT_ROOT" > "$HOME/.mambotts_root"
+
 echo "=========================================================="
 echo "MamboTTS 达芬奇插件安装/更新成功！"
 echo "=========================================================="
