@@ -27,24 +27,29 @@ TOTAL_PARTS=24
 if [ -f "GPT-SoVITS/runtime/bin/python" ] && [ -f "models/manbo-e10.ckpt" ]; then
     echo -e "${GREEN}[成功] 检测到 GPT-SoVITS 独立运行时和模型已就绪，跳过下载。${RESET}"
 else
-    echo -e "${GREEN}[1/3] 正在从 Cloudflare R2 下载完整整合包 (约 5.9 GB)...${RESET}"
-    echo -e "${YELLOW}下载源: ${R2_BASE_URL}${RESET}"
+    if [ ! -f "GPT-SoVITS-v2pro-mac-arm64.tar.gz" ]; then
+        echo -e "${GREEN}[1/3] 正在从 Cloudflare R2 下载完整整合包 (约 5.9 GB)...${RESET}"
+        echo -e "${YELLOW}下载源: ${R2_BASE_URL}${RESET}"
 
-    # 循环下载 24 个分卷
-    for i in $(seq -f "%02g" 0 $((TOTAL_PARTS - 1))); do
-        PART_FILE="GPT-SoVITS-v2pro-mac-arm64.tar.gz.part$i"
-        PART_URL="${R2_BASE_URL}/${PART_FILE}"
-        
-        if [ ! -f "$PART_FILE" ]; then
-            echo -e "${CYAN}正在下载分卷 [$(expr $i + 1)/$TOTAL_PARTS]: ${PART_FILE}...${RESET}"
-            curl -f -L -C - --retry 3 --retry-delay 2 -o "$PART_FILE" "$PART_URL"
-        else
-            echo -e "${GREEN}[完成] 分卷已存在: ${PART_FILE}${RESET}"
-        fi
-    done
+        # 循环下载 24 个分卷
+        for i in $(seq -f "%02g" 0 $((TOTAL_PARTS - 1))); do
+            PART_FILE="GPT-SoVITS-v2pro-mac-arm64.tar.gz.part$i"
+            PART_URL="${R2_BASE_URL}/${PART_FILE}"
+            
+            if [ ! -f "$PART_FILE" ]; then
+                echo -e "${CYAN}正在下载分卷 [$(expr $i + 1)/$TOTAL_PARTS]: ${PART_FILE}...${RESET}"
+                curl -f -L -C - --retry 3 --retry-delay 2 -o "$PART_FILE" "$PART_URL"
+            else
+                echo -e "${GREEN}[完成] 分卷已存在: ${PART_FILE}${RESET}"
+            fi
+        done
 
-    echo -e "${GREEN}[2/3] 合并分卷并解压...${RESET}"
-    cat GPT-SoVITS-v2pro-mac-arm64.tar.gz.part* > GPT-SoVITS-v2pro-mac-arm64.tar.gz
+        echo -e "${GREEN}[2/3] 合并分卷...${RESET}"
+        cat GPT-SoVITS-v2pro-mac-arm64.tar.gz.part* > GPT-SoVITS-v2pro-mac-arm64.tar.gz
+        rm -f GPT-SoVITS-v2pro-mac-arm64.tar.gz.part*
+    else
+        echo -e "${GREEN}[提示] 检测到已存在完整整合包，跳过下载分卷。${RESET}"
+    fi
 
     echo -e "正在校验整合包 SHA256 完整性..."
     ACTUAL_SHA256=$(shasum -a 256 GPT-SoVITS-v2pro-mac-arm64.tar.gz | awk '{print $1}')
@@ -61,7 +66,7 @@ else
     tar -xzf GPT-SoVITS-v2pro-mac-arm64.tar.gz
 
     # 清理临时下载文件节省空间
-    rm -f GPT-SoVITS-v2pro-mac-arm64.tar.gz GPT-SoVITS-v2pro-mac-arm64.tar.gz.part*
+    rm -f GPT-SoVITS-v2pro-mac-arm64.tar.gz
     echo -e "${GREEN}[成功] 解压与环境就绪完成！${RESET}"
 fi
 
