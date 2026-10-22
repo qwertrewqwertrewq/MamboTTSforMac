@@ -289,6 +289,114 @@ def get_audio_duration_seconds(file_path):
         return 0.0
 
 
+def frames_to_timecode(frame_num, fps, drop_frame=False):
+    """根据帧数与帧率计算标准 SMPTE 时间码字符串"""
+    fps_int = int(round(fps))
+    if not drop_frame:
+        ff = int(frame_num % fps_int)
+        total_seconds = int(frame_num // fps_int)
+        ss = int(total_seconds % 60)
+        total_minutes = int(total_seconds // 60)
+        mm = int(total_minutes % 60)
+        hh = int(total_minutes // 60)
+        return f"{hh:02d}:{mm:02d}:{ss:02d}:{ff:02d}"
+    else:
+        drop_frames = 2 if fps_int == 30 else (4 if fps_int == 60 else 0)
+        if drop_frames == 0:
+            return frames_to_timecode(frame_num, fps, False)
+        frames_per_minute = fps_int * 60 - drop_frames
+        frames_per_10minutes = fps_int * 600 - drop_frames * 9
+        d = int(frame_num // frames_per_10minutes)
+        m = int(frame_num % frames_per_10minutes)
+        if m > drop_frames:
+            frame_num += drop_frames * 9 * d + drop_frames * ((m - drop_frames) // frames_per_minute)
+        else:
+            frame_num += drop_frames * 9 * d
+        ff = int(frame_num % fps_int)
+        total_seconds = int(frame_num // fps_int)
+        ss = int(total_seconds % 60)
+        total_minutes = int(total_seconds // 60)
+        mm = int(total_minutes % 60)
+        hh = int(total_minutes // 60)
+        return f"{hh:02d}:{mm:02d}:{ss:02d};{ff:02d}"
+
+
+def trim_timeline_clip(timeline, track_type, track_index, clip_start, clip_end, cut_frame, fps, is_tail=True, log_fn=None):
+    """
+    通过在目标分割帧触发快捷键分割与非波纹删除，实现时间线文字片段（Text+ 或字幕轨）的物理缩减裁剪。
+    自动保护/锁定所有非目标轨道，防止其他轨道素材被误切。
+    """
+    if log_fn is None:
+        log_fn = print
+
+    if cut_frame <= clip_start or cut_frame >= clip_end:
+        log_fn(f"[提示] 裁剪点 {cut_frame} 超出片段有效区间 [{clip_start}, {clip_end}]，无需裁剪缩减")
+        return True
+
+    drop_frame = str(timeline.GetSetting("timelineDropFrameTimecode") or "").strip().lower() in ("1", "true")
+
+    # 1. 记录所有轨道锁定状态，并临时锁定其他所有轨道
+    locked_states = {}
+    for tt in ["video", "audio", "subtitle"]:
+        count = timeline.GetTrackCount(tt) or 0
+        for t_idx in range(1, count + 1):
+            is_locked = timeline.GetIsTrackLocked(tt, t_idx)
+            locked_states[(tt, t_idx)] = is_locked
+            if (tt, t_idx) != (track_type, track_index) and not is_locked:
+                timeline.SetTrackLock(tt, t_idx, True)
+            if (tt, t_idx) == (track_type, track_index) and is_locked:
+                timeline.SetTrackLock(tt, t_idx, False)
+
+    try:
+        # 2. 定位播放头至分割帧
+        tc = frames_to_timecode(cut_frame, fps, drop_frame=drop_frame)
+        timeline.SetCurrentTimecode(tc)
+        time.sleep(0.06)
+
+        # 3. 触发 Cmd+B 切割
+        cmd = '''osascript -e 'tell application "DaVinci Resolve" to activate' -e 'tell application "System Events" to keystroke "b" using {command down}' '''
+        proc = subprocess.run(cmd, shell=True, capture_output=True, text=True)
+        if proc.returncode != 0:
+            err = proc.stderr.strip()
+            log_fn(f"[提示] 自动裁剪快捷键未执行: {err} (如需自动物理裁切，请在「系统偏好设置 -> 隐私与安全性 -> 辅助功能」中允许控制)")
+            return False
+
+        time.sleep(0.08)
+
+        # 4. 找到并删除被分割出来的多余片段
+        clips = timeline.GetItemListInTrack(track_type, track_index) or []
+        target_to_delete = None
+        for c in clips:
+            c_start = c.GetStart()
+            c_end = c.GetEnd()
+            if is_tail:
+                # 裁切尾部：寻找分割出来的后半段
+                if abs(c_start - cut_frame) <= 2 and abs(c_end - clip_end) <= 2:
+                    target_to_delete = c
+                    break
+            else:
+                # 裁切头部：寻找分割出来的前半段
+                if abs(c_start - clip_start) <= 2 and abs(c_end - cut_frame) <= 2:
+                    target_to_delete = c
+                    break
+
+        if target_to_delete:
+            del_ok = timeline.DeleteClips([target_to_delete], False)
+            if del_ok:
+                log_fn(f"[对齐] 成功裁切轨道 {track_type}{track_index} 文字片段，移除多余区间 [{target_to_delete.GetStart()} ~ {target_to_delete.GetEnd()}]")
+            return del_ok
+        else:
+            log_fn(f"[警告] 未在轨道 {track_type}{track_index} 找到待删除的分割片段 (cut_frame={cut_frame}, is_tail={is_tail})")
+            return False
+    except Exception as e:
+        log_fn(f"[错误] 执行时间线裁切出错: {e}")
+        return False
+    finally:
+        # 5. 恢复所有轨道原始锁定状态
+        for (tt, t_idx), orig_locked in locked_states.items():
+            timeline.SetTrackLock(tt, t_idx, orig_locked)
+
+
 # ==============================================================================
 # 时间线文本提取与重叠判定逻辑
 # ==============================================================================
@@ -690,6 +798,7 @@ def run_gui():
         do_auto_trim = bool(auto_trim_check.Checked)
         align_mode = "left" if align_combo.CurrentIndex == 0 else "right"
         allow_new_track_on_overlap = bool(overlap_track_check.Checked)
+        initial_timecode = timeline.GetCurrentTimecode()
 
         # 确定基准目标音频轨
         if sel_track_idx == 0:
@@ -757,36 +866,19 @@ def run_gui():
             if do_auto_trim:
                 if align_mode == "left":
                     record_frame = text_start
-                    # 裁剪文字轨：如果是 Text+，设置 Fusion Comp 有效结束范围
-                    if item["track_type"] == "video_textplus" and item.get("clip_obj"):
-                        try:
-                            comp = item["clip_obj"].GetFusionCompByIndex(1)
-                            if comp:
-                                target_render_end = float(min(text_dur - 1, dur_frames - 1))
-                                comp.SetAttrs({
-                                    "COMPN_RenderEnd": target_render_end,
-                                    "COMPN_GlobalEnd": target_render_end,
-                                })
-                        except Exception as e:
-                            write_log(f"调整 Text+ 范围出错: {e}")
+                    cut_frame = text_start + dur_frames
+                    is_tail = True
                     log(f"[对齐] 左对齐：音频与文字已同步在帧 {record_frame} ~ {record_frame + dur_frames}")
                 else:
                     # 右对齐
                     record_frame = max(text_start, text_end - dur_frames)
-                    if item["track_type"] == "video_textplus" and item.get("clip_obj"):
-                        try:
-                            comp = item["clip_obj"].GetFusionCompByIndex(1)
-                            if comp:
-                                target_render_start = float(max(0, text_dur - dur_frames))
-                                comp.SetAttrs({
-                                    "COMPN_RenderStart": target_render_start,
-                                    "COMPN_GlobalStart": target_render_start,
-                                })
-                        except Exception as e:
-                            write_log(f"调整 Text+ 范围出错: {e}")
+                    cut_frame = record_frame
+                    is_tail = False
                     log(f"[对齐] 右对齐：音频与文字已同步在帧 {record_frame} ~ {text_end}")
             else:
                 record_frame = text_start
+                cut_frame = None
+                is_tail = True
 
             audio_end_frame = record_frame + dur_frames
 
@@ -838,6 +930,48 @@ def run_gui():
                 success_count += 1
             else:
                 log(f"[警告] [{i}/{total}] 插入时间线返回空，请检查轨道是否被锁定")
+
+            # 5. 执行文字轨道物理裁切对齐
+            if do_auto_trim and cut_frame is not None:
+                res_track_type = "subtitle" if item["track_type"] == "subtitle" else "video"
+                trim_ok = trim_timeline_clip(
+                    timeline=timeline,
+                    track_type=res_track_type,
+                    track_index=item["track_index"],
+                    clip_start=text_start,
+                    clip_end=text_end,
+                    cut_frame=cut_frame,
+                    fps=fps,
+                    is_tail=is_tail,
+                    log_fn=log,
+                )
+                if not trim_ok and item["track_type"] == "video_textplus" and item.get("clip_obj"):
+                    # 备用降级方案：调整 Fusion 内部渲染有效范围
+                    try:
+                        comp = item["clip_obj"].GetFusionCompByIndex(1)
+                        if comp:
+                            if is_tail:
+                                comp.SetAttrs({
+                                    "COMPN_RenderEnd": float(min(text_dur - 1, dur_frames - 1)),
+                                    "COMPN_GlobalEnd": float(min(text_dur - 1, dur_frames - 1)),
+                                })
+                            else:
+                                comp.SetAttrs({
+                                    "COMPN_RenderStart": float(max(0, text_dur - dur_frames)),
+                                    "COMPN_GlobalStart": float(max(0, text_dur - dur_frames)),
+                                })
+                    except Exception as e:
+                        write_log(f"备用调整 Fusion 范围出错: {e}")
+
+        # 恢复播放头初始位置
+        if initial_timecode:
+            try:
+                timeline.SetCurrentTimecode(initial_timecode)
+            except Exception:
+                pass
+
+        # 刷新时间线片段列表
+        refresh_scanned_items()
 
         result_msg = f"批量配音完成！成功生成并插入 {success_count}/{total} 个片段。"
         log(result_msg)
