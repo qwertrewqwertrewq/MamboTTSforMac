@@ -397,6 +397,95 @@ def trim_timeline_clip(timeline, track_type, track_index, clip_start, clip_end, 
             timeline.SetTrackLock(tt, t_idx, orig_locked)
 
 
+def extend_timeline_clip(timeline, track_type, track_index, clip_start, clip_end, target_end, fps, log_fn=None):
+    """
+    通过移动播放头至目标延长位置并触发 Extend Edit (快捷键 'e')，
+    实现时间线文字片段（Text+ 或字幕轨）向右延长与音频对齐。
+    自动保护/锁定所有非目标轨道。
+    """
+    if log_fn is None:
+        log_fn = print
+
+    if target_end <= clip_end:
+        return True
+
+    # 1. 检测同轨道后方紧邻片段，避免超出可用间隙引起冲突
+    clips = timeline.GetItemListInTrack(track_type, track_index) or []
+    next_clip_start = None
+    for c in clips:
+        cs = c.GetStart()
+        if cs >= clip_end:
+            if next_clip_start is None or cs < next_clip_start:
+                next_clip_start = cs
+
+    if next_clip_start is not None and target_end > next_clip_start:
+        target_end = next_clip_start
+        log_fn(f"[提示] 目标延长位置超出后方片段间隙，受限延长至后方片段起点 (帧 {next_clip_start})")
+
+    if target_end <= clip_end:
+        log_fn(f"[提示] 轨道 {track_type}{track_index} 后方无空隙，无法继续延长")
+        return False
+
+    drop_frame = str(timeline.GetSetting("timelineDropFrameTimecode") or "").strip().lower() in ("1", "true")
+
+    # 2. 记录所有轨道锁定状态，并临时锁定其他所有轨道
+    locked_states = {}
+    for tt in ["video", "audio", "subtitle"]:
+        count = timeline.GetTrackCount(tt) or 0
+        for t_idx in range(1, count + 1):
+            is_locked = timeline.GetIsTrackLocked(tt, t_idx)
+            locked_states[(tt, t_idx)] = is_locked
+            if (tt, t_idx) != (track_type, track_index) and not is_locked:
+                timeline.SetTrackLock(tt, t_idx, True)
+            if (tt, t_idx) == (track_type, track_index) and is_locked:
+                timeline.SetTrackLock(tt, t_idx, False)
+
+    try:
+        # 3. 播放头定位到片段出点并按 'v' 选中编辑点
+        tc_end = frames_to_timecode(clip_end, fps, drop_frame=drop_frame)
+        timeline.SetCurrentTimecode(tc_end)
+        time.sleep(0.06)
+
+        cmd_v = '''osascript -e 'tell application "DaVinci Resolve" to activate' -e 'tell application "System Events" to keystroke "v"' '''
+        proc_v = subprocess.run(cmd_v, shell=True, capture_output=True, text=True)
+        if proc_v.returncode != 0:
+            log_fn(f"[提示] 延长快捷键未执行: {proc_v.stderr.strip()}")
+            return False
+
+        time.sleep(0.06)
+
+        # 4. 播放头移动到目标延长帧并按 'e' 触发 Extend Edit
+        tc_target = frames_to_timecode(target_end, fps, drop_frame=drop_frame)
+        timeline.SetCurrentTimecode(tc_target)
+        time.sleep(0.06)
+
+        cmd_e = '''osascript -e 'tell application "DaVinci Resolve" to activate' -e 'tell application "System Events" to keystroke "e"' '''
+        proc_e = subprocess.run(cmd_e, shell=True, capture_output=True, text=True)
+        if proc_e.returncode != 0:
+            log_fn(f"[提示] Extend Edit 快捷键未执行: {proc_e.stderr.strip()}")
+            return False
+
+        time.sleep(0.08)
+
+        # 5. 验证是否延长成功
+        clips_after = timeline.GetItemListInTrack(track_type, track_index) or []
+        for c in clips_after:
+            if abs(c.GetStart() - clip_start) <= 2:
+                new_dur = c.GetDuration()
+                new_end = c.GetEnd()
+                log_fn(f"[对齐] 成功将轨道 {track_type}{track_index} 文字片段延长至帧 {new_end} (时长增加至 {new_dur}帧)")
+                return True
+
+        return True
+    except Exception as e:
+        log_fn(f"[错误] 延长文字片段过程异常: {e}")
+        return False
+    finally:
+        # 6. 还原所有轨道锁定状态
+        for (tt, t_idx), orig_locked in locked_states.items():
+            timeline.SetTrackLock(tt, t_idx, orig_locked)
+
+
 # ==============================================================================
 # 时间线文本提取与重叠判定逻辑
 # ==============================================================================
@@ -612,7 +701,7 @@ def run_gui():
         ui.HGroup({"Weight": 0}, [
             ui.CheckBox({
                 "ID": "AutoTrimCheck",
-                "Text": "自动裁剪文字轨道与音频对齐",
+                "Text": "自动裁剪/延长文字轨道与音频对齐",
                 "Checked": True,
                 "Weight": 0
             }),
@@ -830,7 +919,7 @@ def run_gui():
         total = len(scanned_items)
         success_count = 0
         align_text = "左对齐" if align_mode == "left" else "右对齐"
-        trim_desc = f"自动裁剪文字轨 ({align_text})" if do_auto_trim else "保持文字原长"
+        trim_desc = f"自动裁剪/延长文字轨 ({align_text})" if do_auto_trim else "保持文字原长"
         overlap_desc = "新建分轨放置" if allow_new_track_on_overlap else "默认同轨覆盖"
 
         log(f"开始批量处理共 {total} 个片段 | 语速: {speed_val}x | {trim_desc} | 重叠处理: {overlap_desc}")
@@ -866,19 +955,23 @@ def run_gui():
             if do_auto_trim:
                 if align_mode == "left":
                     record_frame = text_start
-                    cut_frame = text_start + dur_frames
-                    is_tail = True
-                    log(f"[对齐] 左对齐：音频与文字已同步在帧 {record_frame} ~ {record_frame + dur_frames}")
+                    if dur_frames < text_dur:
+                        align_action = f"左对齐裁剪：文字将从 {text_dur} 帧裁剪至 {dur_frames} 帧"
+                    elif dur_frames > text_dur:
+                        align_action = f"左对齐延长：文字将从 {text_dur} 帧自动延长至 {dur_frames} 帧"
+                    else:
+                        align_action = "左对齐：文字与音频时长完全吻合"
+                    log(f"[对齐] {align_action} (帧 {record_frame} ~ {record_frame + dur_frames})")
                 else:
                     # 右对齐
-                    record_frame = max(text_start, text_end - dur_frames)
-                    cut_frame = record_frame
-                    is_tail = False
-                    log(f"[对齐] 右对齐：音频与文字已同步在帧 {record_frame} ~ {text_end}")
+                    record_frame = max(0, text_end - dur_frames)
+                    if dur_frames < text_dur:
+                        align_action = f"右对齐裁剪：文字将从 {text_dur} 帧裁剪至 {dur_frames} 帧"
+                    else:
+                        align_action = "右对齐：以终点为基准对齐"
+                    log(f"[对齐] {align_action} (帧 {record_frame} ~ {text_end})")
             else:
                 record_frame = text_start
-                cut_frame = None
-                is_tail = True
 
             audio_end_frame = record_frame + dur_frames
 
@@ -931,37 +1024,75 @@ def run_gui():
             else:
                 log(f"[警告] [{i}/{total}] 插入时间线返回空，请检查轨道是否被锁定")
 
-            # 5. 执行文字轨道物理裁切对齐
-            if do_auto_trim and cut_frame is not None:
+            # 5. 执行文字轨道物理对齐 (智能裁剪或延长)
+            if do_auto_trim:
                 res_track_type = "subtitle" if item["track_type"] == "subtitle" else "video"
-                trim_ok = trim_timeline_clip(
-                    timeline=timeline,
-                    track_type=res_track_type,
-                    track_index=item["track_index"],
-                    clip_start=text_start,
-                    clip_end=text_end,
-                    cut_frame=cut_frame,
-                    fps=fps,
-                    is_tail=is_tail,
-                    log_fn=log,
-                )
-                if not trim_ok and item["track_type"] == "video_textplus" and item.get("clip_obj"):
-                    # 备用降级方案：调整 Fusion 内部渲染有效范围
-                    try:
-                        comp = item["clip_obj"].GetFusionCompByIndex(1)
-                        if comp:
-                            if is_tail:
-                                comp.SetAttrs({
-                                    "COMPN_RenderEnd": float(min(text_dur - 1, dur_frames - 1)),
-                                    "COMPN_GlobalEnd": float(min(text_dur - 1, dur_frames - 1)),
-                                })
-                            else:
-                                comp.SetAttrs({
-                                    "COMPN_RenderStart": float(max(0, text_dur - dur_frames)),
-                                    "COMPN_GlobalStart": float(max(0, text_dur - dur_frames)),
-                                })
-                    except Exception as e:
-                        write_log(f"备用调整 Fusion 范围出错: {e}")
+                if dur_frames < text_dur:
+                    # 音频短于文字：裁剪缩减文字片段
+                    if align_mode == "left":
+                        cut_frame = text_start + dur_frames
+                        is_tail = True
+                    else:
+                        cut_frame = record_frame
+                        is_tail = False
+
+                    trim_ok = trim_timeline_clip(
+                        timeline=timeline,
+                        track_type=res_track_type,
+                        track_index=item["track_index"],
+                        clip_start=text_start,
+                        clip_end=text_end,
+                        cut_frame=cut_frame,
+                        fps=fps,
+                        is_tail=is_tail,
+                        log_fn=log,
+                    )
+                    if not trim_ok and item["track_type"] == "video_textplus" and item.get("clip_obj"):
+                        # 备用降级方案：调整 Fusion 内部渲染有效范围
+                        try:
+                            comp = item["clip_obj"].GetFusionCompByIndex(1)
+                            if comp:
+                                if is_tail:
+                                    comp.SetAttrs({
+                                        "COMPN_RenderEnd": float(min(text_dur - 1, dur_frames - 1)),
+                                        "COMPN_GlobalEnd": float(min(text_dur - 1, dur_frames - 1)),
+                                    })
+                                else:
+                                    comp.SetAttrs({
+                                        "COMPN_RenderStart": float(max(0, text_dur - dur_frames)),
+                                        "COMPN_GlobalStart": float(max(0, text_dur - dur_frames)),
+                                    })
+                        except Exception as e:
+                            write_log(f"备用调整 Fusion 范围出错: {e}")
+
+                elif dur_frames > text_dur:
+                    # 音频长于文字：自动延长文字片段至音频结束
+                    if align_mode == "left":
+                        target_end = text_start + dur_frames
+                        extend_timeline_clip(
+                            timeline=timeline,
+                            track_type=res_track_type,
+                            track_index=item["track_index"],
+                            clip_start=text_start,
+                            clip_end=text_end,
+                            target_end=target_end,
+                            fps=fps,
+                            log_fn=log,
+                        )
+                        if item["track_type"] == "video_textplus" and item.get("clip_obj"):
+                            try:
+                                comp = item["clip_obj"].GetFusionCompByIndex(1)
+                                if comp:
+                                    comp.SetAttrs({
+                                        "COMPN_RenderEnd": float(dur_frames - 1),
+                                        "COMPN_GlobalEnd": float(dur_frames - 1),
+                                    })
+                            except Exception as e:
+                                write_log(f"更新 Text+ Fusion 渲染范围出错: {e}")
+                    else:
+                        log(f"[提示] 右对齐模式下音频长于文字，已以文字终点为基准对齐 (帧 {record_frame} ~ {text_end})")
+                else:
+                    log(f"[对齐] 音频时长 ({dur_frames}帧) 与文字原长完全一致，无需调整")
 
         # 恢复播放头初始位置
         if initial_timecode:
