@@ -1,0 +1,7 @@
+name = "mambo-tts-web"
+main = "worker.js"
+compatibility_date = "2024-01-01"
+
+routes = [
+  { pattern = "rinku.dpdns.org", custom_domain = true }
+]

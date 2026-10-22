@@ -1,6 +1,10 @@
-<h1 align="center">MamboTTS (Mac & Windows)</h1>
+<h1 align="center">MamboTTS for macOS & Windows</h1>
 
-<p align="center"><strong>面向 B 站 / 抖音曼波讲故事类解说场景的本地一键配音工具与达芬奇 (DaVinci Resolve) 插件</strong></p>
+<p align="center"><strong>面向解说与短视频创作场景的本地拟真语音合成工具与达芬奇 (DaVinci Resolve) 剪辑插件</strong></p>
+
+<p align="center">
+  <a href="https://rinku.dpdns.org"><strong>[项目官网与架构介绍: rinku.dpdns.org]</strong></a>
+</p>
 
 <p align="center">
   <img src="https://img.shields.io/badge/macOS-Apple_Silicon-0A0A0B?style=flat-square" alt="macOS" />
@@ -11,32 +15,46 @@
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-0A0A0B?style=flat-square" alt="MIT" /></a>
 </p>
 
-> 基于 GPT-SoVITS，在本地 GPU（Apple Silicon MPS / NVIDIA CUDA）上毫秒级合成曼波专属解说语音。不仅提供独立桌面客户端，还深度整合 **达芬奇 (DaVinci Resolve)** 剪辑轨，一键批量转换时间线文字为独立音频轨。
+> 基于 GPT-SoVITS，在本地 GPU（Apple Silicon MPS / NVIDIA CUDA）上毫秒级合成高质量拟真解说语音。不仅提供独立桌面客户端，还深度整合 **达芬奇 (DaVinci Resolve)** 剪辑轨，一键批量转换时间线文字为独立音频轨。
 
 ---
 
-## 🍎 macOS 快速开始 (Apple Silicon M 系列)
+## 项目官网与源码下载
+
+- **官方网站 / 原理介绍**：[https://rinku.dpdns.org](https://rinku.dpdns.org)
+- **GitHub 源码仓库**：[https://github.com/qwertrewqwertrewq/MamboTTSforMac](https://github.com/qwertrewqwertrewq/MamboTTSforMac)
+- **源码包直链 (适合无 Git 用户)**：[https://rinku.dpdns.org/MamboTTSforMac-source.zip](https://rinku.dpdns.org/MamboTTSforMac-source.zip)
+
+---
+
+## macOS 快速开始 (Apple Silicon M 系列)
 
 macOS 版本已全面适配 Apple Silicon (MPS 硬件加速)，内置免配置独立 Python 运行时、GPT-SoVITS 底模及曼波权重，开箱即用。
 
-### 1. 运行一键安装脚本
-在项目根目录终端执行：
+### 方式 A：源码压缩包安装（推荐，无需安装 Git）
+1. 下载源码压缩包：[MamboTTSforMac-source.zip](https://rinku.dpdns.org/MamboTTSforMac-source.zip) 并解压。
+2. 打开解压后的文件夹，双击运行 `install_mac.sh`（或在终端运行 `./install_mac.sh`）。
+3. 脚本将自动从 Cloudflare R2 极速拉取预编译运行时环境与模型并自动就绪。
+
+### 方式 B：Git 仓库克隆（开发者推荐）
+在终端中执行：
 ```bash
+git clone https://github.com/qwertrewqwertrewq/MamboTTSforMac.git
+cd MamboTTSforMac
 ./install_mac.sh
 ```
-脚本将自动从 Cloudflare R2 高速下载预编译完整环境整合包并自动完成部署。
 
-### 2. 启动方式
+### 启动方式
 - **独立桌面客户端**：双击运行 `MamboTTS.command` 或在终端运行 `./run.sh`。
 - **达芬奇 (DaVinci Resolve) 剪辑插件**：
   1. 打开达芬奇项目并进入剪辑时间线；
   2. 在达芬奇顶部菜单选择：**工作区 (Workspace) -> 脚本 (Scripts) -> Utility -> MamboTTS_Resolve**；
   3. 或者直接双击运行项目根目录下的 `MamboTTS_DaVinci.command`。
-  4. 插件将自动识别当前时间线上的所有 Text+ 标题字幕，一键调用 GPT-SoVITS 批量生成音频，并精准按字幕起止时间直接追加在对应时间线音频轨上！
+  4. 插件将自动识别当前时间线上的所有字幕轨或 Text+ 标题字幕，一键调用 GPT-SoVITS 批量生成音频，并精准按字幕起止时间直接追加在对应时间线音频轨上，支持自动轨道裁剪与对齐！
 
 ---
 
-## 🪟 Windows 快速开始
+## Windows 快速开始
 
 ### 1. 下载并解压
 

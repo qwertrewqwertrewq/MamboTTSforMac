@@ -1,0 +1,639 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MamboTTS for macOS | 本地拟真语音合成与达芬奇剪辑助手</title>
+    <meta name="description" content="基于 GPT-SoVITS 深度适配 Apple Silicon 的本地语音合成工作流，为 DaVinci Resolve 达芬奇剪辑提供一键字幕扫描与时间线无缝配音。">
+    <style>
+        :root {
+            --bg-primary: #0f1117;
+            --bg-secondary: #171b26;
+            --bg-card: #1f2433;
+            --border-color: #2b3247;
+            --text-primary: #f0f3fa;
+            --text-secondary: #9aa5b8;
+            --text-muted: #647087;
+            --accent: #3b82f6;
+            --accent-hover: #2563eb;
+            --accent-light: rgba(59, 130, 246, 0.12);
+            --success: #10b981;
+            --success-light: rgba(16, 185, 129, 0.12);
+            --code-bg: #11141c;
+            --radius-lg: 12px;
+            --radius-md: 8px;
+            --radius-sm: 6px;
+        }
+
+        @media (prefers-color-scheme: light) {
+            :root {
+                --bg-primary: #f8fafc;
+                --bg-secondary: #ffffff;
+                --bg-card: #f1f5f9;
+                --border-color: #e2e8f0;
+                --text-primary: #0f172a;
+                --text-secondary: #475569;
+                --text-muted: #64748b;
+                --accent: #2563eb;
+                --accent-hover: #1d4ed8;
+                --accent-light: rgba(37, 99, 235, 0.08);
+                --success: #059669;
+                --success-light: rgba(5, 150, 105, 0.08);
+                --code-bg: #e2e8f0;
+            }
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            background-color: var(--bg-primary);
+            color: var(--text-primary);
+            line-height: 1.6;
+            -webkit-font-smoothing: antialiased;
+        }
+
+        a {
+            color: var(--accent);
+            text-decoration: none;
+            transition: color 0.15s ease;
+        }
+
+        a:hover {
+            color: var(--accent-hover);
+        }
+
+        .container {
+            max-width: 1040px;
+            margin: 0 auto;
+            padding: 0 24px;
+        }
+
+        /* 顶部导航 */
+        header {
+            border-bottom: 1px solid var(--border-color);
+            background: rgba(15, 17, 23, 0.85);
+            backdrop-filter: blur(12px);
+            position: sticky;
+            top: 0;
+            z-index: 100;
+        }
+
+        .nav-inner {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            height: 64px;
+        }
+
+        .brand {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            font-weight: 700;
+            font-size: 1.15rem;
+            letter-spacing: -0.02em;
+        }
+
+        .tag {
+            font-size: 0.75rem;
+            font-weight: 600;
+            padding: 2px 8px;
+            border-radius: 9999px;
+            background: var(--accent-light);
+            color: var(--accent);
+            border: 1px solid var(--accent);
+        }
+
+        .tag-success {
+            background: var(--success-light);
+            color: var(--success);
+            border: 1px solid var(--success);
+        }
+
+        .nav-links {
+            display: flex;
+            gap: 20px;
+            font-size: 0.9rem;
+            font-weight: 500;
+        }
+
+        /* 英雄区 */
+        .hero {
+            padding: 72px 0 56px;
+            text-align: center;
+        }
+
+        .hero-badges {
+            display: flex;
+            justify-content: center;
+            gap: 10px;
+            margin-bottom: 20px;
+            flex-wrap: wrap;
+        }
+
+        .hero h1 {
+            font-size: 2.75rem;
+            font-weight: 800;
+            letter-spacing: -0.03em;
+            margin-bottom: 16px;
+            line-height: 1.2;
+        }
+
+        .hero p.lead {
+            font-size: 1.15rem;
+            color: var(--text-secondary);
+            max-width: 680px;
+            margin: 0 auto 36px;
+        }
+
+        .cta-group {
+            display: flex;
+            justify-content: center;
+            gap: 16px;
+            flex-wrap: wrap;
+        }
+
+        .btn {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            padding: 12px 24px;
+            font-size: 0.95rem;
+            font-weight: 600;
+            border-radius: var(--radius-md);
+            transition: all 0.2s ease;
+            cursor: pointer;
+            border: 1px solid transparent;
+        }
+
+        .btn-primary {
+            background: var(--accent);
+            color: #ffffff;
+        }
+
+        .btn-primary:hover {
+            background: var(--accent-hover);
+            color: #ffffff;
+        }
+
+        .btn-secondary {
+            background: var(--bg-card);
+            color: var(--text-primary);
+            border-color: var(--border-color);
+        }
+
+        .btn-secondary:hover {
+            background: var(--border-color);
+        }
+
+        .btn-subtext {
+            font-size: 0.75rem;
+            opacity: 0.85;
+            margin-left: 6px;
+            font-weight: normal;
+        }
+
+        /* 内容板块 */
+        section {
+            padding: 56px 0;
+            border-top: 1px solid var(--border-color);
+        }
+
+        .section-header {
+            margin-bottom: 32px;
+        }
+
+        .section-title {
+            font-size: 1.75rem;
+            font-weight: 700;
+            letter-spacing: -0.02em;
+            margin-bottom: 8px;
+        }
+
+        .section-desc {
+            color: var(--text-secondary);
+            font-size: 1rem;
+        }
+
+        /* 网格卡片 */
+        .grid-2 {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+            gap: 20px;
+        }
+
+        .grid-3 {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+            gap: 20px;
+        }
+
+        .card {
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-lg);
+            padding: 24px;
+        }
+
+        .card h3 {
+            font-size: 1.15rem;
+            font-weight: 600;
+            margin-bottom: 10px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .card p {
+            color: var(--text-secondary);
+            font-size: 0.92rem;
+            line-height: 1.6;
+        }
+
+        /* 运行原理步骤 */
+        .pipeline {
+            display: flex;
+            flex-direction: column;
+            gap: 16px;
+        }
+
+        .step-item {
+            display: flex;
+            gap: 18px;
+            padding: 20px;
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-md);
+        }
+
+        .step-num {
+            font-weight: 800;
+            font-size: 1.25rem;
+            color: var(--accent);
+            line-height: 1;
+            min-width: 28px;
+        }
+
+        .step-content h4 {
+            font-size: 1rem;
+            font-weight: 600;
+            margin-bottom: 6px;
+        }
+
+        .step-content p {
+            color: var(--text-secondary);
+            font-size: 0.9rem;
+        }
+
+        /* 代码块与快速上手 */
+        .install-box {
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-lg);
+            padding: 28px;
+            margin-bottom: 24px;
+        }
+
+        .install-box h3 {
+            font-size: 1.2rem;
+            margin-bottom: 12px;
+        }
+
+        .code-block {
+            background: var(--code-bg);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-sm);
+            padding: 14px 18px;
+            font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+            font-size: 0.88rem;
+            color: var(--text-primary);
+            overflow-x: auto;
+            margin: 14px 0;
+            line-height: 1.5;
+        }
+
+        .steps-list {
+            list-style: none;
+            counter-reset: custom-counter;
+        }
+
+        .steps-list li {
+            position: relative;
+            padding-left: 28px;
+            margin-bottom: 12px;
+            color: var(--text-secondary);
+            font-size: 0.95rem;
+        }
+
+        .steps-list li strong {
+            color: var(--text-primary);
+        }
+
+        .steps-list li::before {
+            counter-increment: custom-counter;
+            content: "[" counter(custom-counter) "]";
+            position: absolute;
+            left: 0;
+            top: 0;
+            color: var(--accent);
+            font-weight: 700;
+            font-size: 0.85rem;
+        }
+
+        /* 状态与系统要求表格 */
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 0.9rem;
+            background: var(--bg-secondary);
+            border-radius: var(--radius-md);
+            overflow: hidden;
+            border: 1px solid var(--border-color);
+        }
+
+        th, td {
+            padding: 12px 18px;
+            text-align: left;
+            border-bottom: 1px solid var(--border-color);
+        }
+
+        th {
+            background: var(--bg-card);
+            font-weight: 600;
+            color: var(--text-primary);
+        }
+
+        td {
+            color: var(--text-secondary);
+        }
+
+        tr:last-child td {
+            border-bottom: none;
+        }
+
+        /* 页脚 */
+        footer {
+            border-top: 1px solid var(--border-color);
+            padding: 40px 0;
+            font-size: 0.85rem;
+            color: var(--text-muted);
+            text-align: center;
+        }
+
+        .footer-links {
+            display: flex;
+            justify-content: center;
+            gap: 20px;
+            margin-bottom: 14px;
+        }
+
+        .meta-status {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            padding: 4px 12px;
+            border-radius: 9999px;
+            background: var(--bg-card);
+            border: 1px solid var(--border-color);
+            margin-top: 16px;
+            font-size: 0.8rem;
+        }
+    </style>
+</head>
+<body>
+
+    <!-- 顶部导航 -->
+    <header>
+        <div class="container nav-inner">
+            <div class="brand">
+                <span>MamboTTS for macOS</span>
+                <span class="tag">[开源适配]</span>
+            </div>
+            <div class="nav-links">
+                <a href="#origin">项目来源</a>
+                <a href="#principles">运作原理</a>
+                <a href="#download">下载与安装</a>
+                <a href="https://github.com/qwertrewqwertrewq/MamboTTSforMac" target="_blank" rel="noopener">GitHub 仓库</a>
+            </div>
+        </div>
+    </header>
+
+    <!-- 英雄区 -->
+    <main class="container">
+        <section class="hero" style="border-top: none;">
+            <div class="hero-badges">
+                <span class="tag">[macOS Apple Silicon 专属定制]</span>
+                <span class="tag">[PyTorch MPS 硬件加速]</span>
+                <span class="tag tag-success">[DaVinci Resolve 原生集成]</span>
+            </div>
+            <h1>本地运行的高质量 AI 拟真配音系统</h1>
+            <p class="lead">
+                专为 Mac 创作者与达芬奇 (DaVinci Resolve) 剪辑师打造。<br>
+                无需手动配置 Python 与 CUDA 环境，开箱即用，一键扫描字幕轨并自动排布对齐音频。
+            </p>
+            <div class="cta-group">
+                <a href="https://r2.rinku.dpdns.org/MamboTTSforMac-source.zip" class="btn btn-primary">
+                    [源码下载] <span class="btn-subtext">(.zip 格式, 适合无 Git 用户)</span>
+                </a>
+                <a href="https://github.com/qwertrewqwertrewq/MamboTTSforMac" target="_blank" rel="noopener" class="btn btn-secondary">
+                    [GitHub 仓库] <span class="btn-subtext">(获取最新代码)</span>
+                </a>
+                <a href="#download" class="btn btn-secondary">
+                    [查看安装说明]
+                </a>
+            </div>
+        </section>
+
+        <!-- 板块 1: 项目来源与 Fork 背景 -->
+        <section id="origin">
+            <div class="section-header">
+                <h2 class="section-title">项目来源与背景</h2>
+                <p class="section-desc">传承优秀的开源生态，打造丝滑的 macOS 原生工作流体验</p>
+            </div>
+            <div class="grid-2">
+                <div class="card">
+                    <h3>[上游核心] GPT-SoVITS 与 MamboTTS 原版</h3>
+                    <p>
+                        本项目源自开源语音合成项目 <strong>MamboTTS</strong> 与 <strong>GPT-SoVITS</strong> 推理内核。原版主要针对 Windows 平台及 NVIDIA CUDA 显卡环境设计，在 macOS 系统上往往面临依赖缺失、环境冲突、编译困难以及启动繁琐等门槛。
+                    </p>
+                </div>
+                <div class="card">
+                    <h3>[本 Fork 特色] 针对 Mac 与达芬奇的深度重构</h3>
+                    <p>
+                        本工程为针对 macOS (特别是 Apple Silicon M 系列芯片) 深度适配的开源独立分支。重构了底层硬件加速通道与剪辑交互层，彻底摆脱外部复杂依赖，让创作者专注于视频生产力本身。
+                    </p>
+                </div>
+            </div>
+
+            <div style="margin-top: 20px;" class="card">
+                <h3>[核心改进清单]</h3>
+                <ul class="steps-list" style="margin-top: 12px;">
+                    <li><strong>Apple Silicon MPS 原生加速</strong>：底层采用 PyTorch Metal Performance Shaders，充分利用 M 系列统一内存架构，无需昂贵的独立 GPU。</li>
+                    <li><strong>达芬奇 (DaVinci Resolve) 官方脚本原生接入</strong>：基于 Fusion Scripting API 打造可视化界面，直接读取工程时间线中的字幕或 Text+ 轨道，自动合成并精确排布回时间线。</li>
+                    <li><strong>音频尾部多余空白截除</strong>：消除 TTS 模型常见的 0.3~0.5s 尾部停顿，通过动态振幅分析截除静音并平滑淡出，极大提升短视频口播的紧凑度。</li>
+                    <li><strong>轨道自动裁剪与对齐</strong>：支持一键将文本轨裁切至与生成音频等长，支持左对齐与右对齐切换，重叠音频自动覆盖或独立新建轨道。</li>
+                    <li><strong>零配置一键安装</strong>：集成 Cloudflare R2 极速分卷分发与 SHA256 自校验机制，运行一键安装脚本即可自动就绪模型与环境。</li>
+                </ul>
+            </div>
+        </section>
+
+        <!-- 板块 2: 运作原理 -->
+        <section id="principles">
+            <div class="section-header">
+                <h2 class="section-title">系统架构与运作原理</h2>
+                <p class="section-desc">从时间线台词识别到音频注入的端到端技术链条</p>
+            </div>
+            <div class="pipeline">
+                <div class="step-item">
+                    <div class="step-num">01</div>
+                    <div class="step-content">
+                        <h4>达芬奇时间线轨道扫描 (Resolve Scripting Bridge)</h4>
+                        <p>通过达芬奇内部脚本环境或外部 IPC 通信注入 <code>DaVinciResolveScript</code> 运行时，自动识别当前活跃工程与时间线，扫描字幕轨 (Subtitle) 与 Text+ 标题轨中的所有台词内容、入出点帧数（In/Out Frames）及时间码。</p>
+                    </div>
+                </div>
+
+                <div class="step-item">
+                    <div class="step-num">02</div>
+                    <div class="step-content">
+                        <h4>高拟真语音合成与 MPS 张量计算 (Inference Engine)</h4>
+                        <p>本地后台常驻的 GPT-SoVITS 引擎接收合成指令，利用 macOS MPS 硬件加速调用曼波或自定义参考音频音色模型，在毫秒级内完成文本特征提取、声学特征生成与高质量波形生成。</p>
+                    </div>
+                </div>
+
+                <div class="step-item">
+                    <div class="step-num">03</div>
+                    <div class="step-content">
+                        <h4>音频静音分析与尾部截除算法 (Smart Post-Processing)</h4>
+                        <p>程序对合成生成的 WAV 波形进行逆向振幅分析，检测有效发音的截断点，自动裁剪多余的尾部无声数据（保留 60ms 自然衰减并施加 15ms 线性淡出），防止出现爆音与不自然的空白缝隙。</p>
+                    </div>
+                </div>
+
+                <div class="step-item">
+                    <div class="step-num">04</div>
+                    <div class="step-content">
+                        <h4>时码换算与无损插入 (Timeline Injection & Alignment)</h4>
+                        <p>根据工程设定帧率（24/25/30/60 fps）精确换算音频帧长度，将音频直接写入指定音轨。若勾选自动裁剪，系统会自动将对应的文本轨道项裁剪为与音频时长一致，实现音画精准对齐。</p>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- 板块 3: 下载与快速上手 -->
+        <section id="download">
+            <div class="section-header">
+                <h2 class="section-title">下载与安装指引</h2>
+                <p class="section-desc">提供压缩包直接下载与 Git 仓库两种获取方式，按需选用</p>
+            </div>
+
+            <!-- 方式一：压缩包下载 -->
+            <div class="install-box">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; flex-wrap: wrap; gap: 8px;">
+                    <h3>方式 A：源码压缩包安装（适合无 Git 环境的普通用户，推荐）</h3>
+                    <span class="tag tag-success">[无需安装 Git]</span>
+                </div>
+                <ol class="steps-list">
+                    <li>
+                        <strong>下载源码压缩包</strong>：
+                        点击下方按钮直接下载包含全部脚本与插件的源码包（约 1.2MB）：<br>
+                        <div style="margin-top: 10px;">
+                            <a href="https://r2.rinku.dpdns.org/MamboTTSforMac-source.zip" class="btn btn-primary" style="padding: 8px 18px; font-size: 0.88rem;">
+                                [立即下载 MamboTTSforMac-source.zip]
+                            </a>
+                        </div>
+                    </li>
+                    <li>
+                        <strong>解压并打开文件夹</strong>：
+                        解压后进入解压得到的 <code>MamboTTSforMac</code> 目录。
+                    </li>
+                    <li>
+                        <strong>运行一键部署脚本</strong>：
+                        双击运行 <code>install_mac.sh</code>（或打开终端进入该目录执行 <code>./install_mac.sh</code>）。<br>
+                        安装程序会自动从高速 R2 镜像拉取预编译运行时环境与模型，完成自动解压与达芬奇插件配置。
+                    </li>
+                    <li>
+                        <strong>启动使用</strong>：
+                        <ul>
+                            <li><strong>独立客户端</strong>：双击 <code>MamboTTS.command</code>；</li>
+                            <li><strong>达芬奇插件</strong>：打开达芬奇工程后，在顶部菜单【工作区 -> 脚本 -> Utility -> MamboTTS_Resolve】直接呼出，或双击 <code>MamboTTS_DaVinci.command</code>。</li>
+                        </ul>
+                    </li>
+                </ol>
+            </div>
+
+            <!-- 方式二：Git 仓库 -->
+            <div class="install-box">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; flex-wrap: wrap; gap: 8px;">
+                    <h3>方式 B：Git 仓库克隆（适合开发者）</h3>
+                    <span class="tag">[支持便捷升级与追更]</span>
+                </div>
+                <p style="color: var(--text-secondary); font-size: 0.92rem; margin-bottom: 10px;">在终端中按顺序执行以下命令：</p>
+                <div class="code-block">git clone https://github.com/qwertrewqwertrewq/MamboTTSforMac.git
+cd MamboTTSforMac
+./install_mac.sh</div>
+                <p style="color: var(--text-secondary); font-size: 0.88rem;">后续更新代码只需在目录内执行 <code>git pull</code> 即可。</p>
+            </div>
+        </section>
+
+        <!-- 板块 4: 系统要求 -->
+        <section id="requirements">
+            <div class="section-header">
+                <h2 class="section-title">系统与硬件要求</h2>
+                <p class="section-desc">运行本系统所需的最低与推荐软硬件环境</p>
+            </div>
+            <table>
+                <thead>
+                    <tr>
+                        <th>环境项目</th>
+                        <th>规格要求</th>
+                        <th>说明</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td>操作系统</td>
+                        <td>macOS 12.0 (Monterey) 或更高版本</td>
+                        <td>全面适配 macOS Ventura / Sonoma / Sequoia</td>
+                    </tr>
+                    <tr>
+                        <td>处理器架构</td>
+                        <td>Apple Silicon 芯片 (M1 / M2 / M3 / M4 系列)</td>
+                        <td>依托统一内存与 Metal 硬件加速器提供推理支持</td>
+                    </tr>
+                    <tr>
+                        <td>剪辑软件</td>
+                        <td>DaVinci Resolve 18 / 19 / 20+</td>
+                        <td>免费版 (Free) 与 Studio 专业版均可完美支持</td>
+                    </tr>
+                    <tr>
+                        <td>磁盘可用空间</td>
+                        <td>建议预留 15GB 以上空闲空间</td>
+                        <td>用于存放预编译独立 Python 运行时、模型权重及音色缓存</td>
+                    </tr>
+                </tbody>
+            </table>
+        </section>
+    </main>
+
+    <!-- 页脚 -->
+    <footer>
+        <div class="container">
+            <div class="footer-links">
+                <a href="https://github.com/qwertrewqwertrewq/MamboTTSforMac" target="_blank" rel="noopener">GitHub 仓库</a>
+                <a href="https://r2.rinku.dpdns.org/MamboTTSforMac-source.zip">源码包直链</a>
+                <a href="https://github.com/qwertrewqwertrewq/MamboTTSforMac/blob/main/LICENSE" target="_blank" rel="noopener">开源协议 (MIT)</a>
+            </div>
+            <p>基于开源项目 MamboTTS 与 GPT-SoVITS 衍生开发。遵循相关开源许可协议。</p>
+            <div class="meta-status">
+                <span style="display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: #10b981;"></span>
+                <span>[服务节点: Cloudflare R2 / Pages 高速 CDN 运行中]</span>
+            </div>
+        </div>
+    </footer>
+
+</body>
+</html>
