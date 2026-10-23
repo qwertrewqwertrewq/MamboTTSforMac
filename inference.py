@@ -191,8 +191,21 @@ class TTSClient:
                                 if chunk:
                                     f.write(chunk)
                     except PermissionError:
+                        try:
+                            if os.path.exists(save_path) and os.path.getsize(save_path) == 0:
+                                os.remove(save_path)
+                        except OSError:
+                            pass
                         return False, f"文件被占用或无写入权限：{save_path}\n请关闭正在使用该文件的程序后重试。"
-                    except OSError as e:
+                    except (OSError, requests.RequestException) as e:
+                        try:
+                            if os.path.exists(save_path):
+                                os.remove(save_path)
+                        except OSError:
+                            pass
+                        err_str = str(e)
+                        if "Response ended prematurely" in err_str or "IncompleteRead" in err_str:
+                            return False, f"合成失败：引擎在传输音频数据中途断开连接 (Response ended prematurely)。\n通常因旧引擎僵尸进程占用了 9880 端口导致。已清理残损文件，请点击「重启引擎」重试。"
                         return False, f"保存文件失败：{e}\n路径：{save_path}"
                     # 写完再校验 WAV 结构：流式模式下无法提前看 content
                     try:
