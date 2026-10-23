@@ -415,7 +415,7 @@
                 <span class="tag">[开源适配]</span>
             </div>
             <div class="nav-links">
-                <a href="#origin">项目来源</a>
+                <a href="#origin">项目来源 (Fork)</a>
                 <a href="#principles">运作原理</a>
                 <a href="#download">下载与安装</a>
                 <a href="https://github.com/qwertrewqwertrewq/MamboTTSforMac" target="_blank" rel="noopener">GitHub 仓库</a>
@@ -427,9 +427,11 @@
     <main class="container">
         <section class="hero" style="border-top: none;">
             <div class="hero-badges">
+                <span class="tag">[Fork 自 Tsukimisaka/MamboTTS]</span>
+                <span class="tag">[当前仅适配达芬奇 · PR暂不可用]</span>
                 <span class="tag">[macOS Apple Silicon 专属定制]</span>
                 <span class="tag">[PyTorch MPS 硬件加速]</span>
-                <span class="tag tag-success">[DaVinci Resolve 原生集成]</span>
+                <span class="tag tag-success">[遵循 MIT 开源协议]</span>
             </div>
             <h1>本地运行的高质量 AI 拟真配音系统</h1>
             <p class="lead">
@@ -452,14 +454,14 @@
         <!-- 板块 1: 项目来源与 Fork 背景 -->
         <section id="origin">
             <div class="section-header">
-                <h2 class="section-title">项目来源与背景</h2>
+                <h2 class="section-title">项目来源与 Fork 背景</h2>
                 <p class="section-desc">传承优秀的开源生态，打造丝滑的 macOS 原生工作流体验</p>
             </div>
             <div class="grid-2">
                 <div class="card">
-                    <h3>[上游核心] GPT-SoVITS 与 MamboTTS 原版</h3>
+                    <h3>[上游核心] 原版 MamboTTS 与 GPT-SoVITS</h3>
                     <p>
-                        本项目源自开源语音合成项目 <strong>MamboTTS</strong> 与 <strong>GPT-SoVITS</strong> 推理内核。原版主要针对 Windows 平台及 NVIDIA CUDA 显卡环境设计，在 macOS 系统上往往面临依赖缺失、环境冲突、编译困难以及启动繁琐等门槛。
+                        本项目 Fork 自开源项目 <strong><a href="https://github.com/Tsukimisaka/MamboTTS" target="_blank" rel="noopener">Tsukimisaka/MamboTTS</a></strong>，其底层依托 <strong>GPT-SoVITS</strong> 推理内核。原版主要针对 Windows 平台及 NVIDIA CUDA 显卡环境设计，在 macOS 系统上往往面临依赖缺失、环境冲突、编译困难以及启动繁琐等门槛。
                     </p>
                 </div>
                 <div class="card">
@@ -468,6 +470,16 @@
                         本工程为针对 macOS (特别是 Apple Silicon M 系列芯片) 深度适配的开源独立分支。重构了底层硬件加速通道与剪辑交互层，彻底摆脱外部复杂依赖，让创作者专注于视频生产力本身。
                     </p>
                 </div>
+            </div>
+
+            <div style="margin-top: 16px; padding: 18px 20px; background: rgba(59, 130, 246, 0.08); border: 1px solid rgba(59, 130, 246, 0.22); border-radius: var(--radius-md);">
+                <h4 style="color: var(--text-primary); margin-bottom: 8px;">[关于仓库文件残留、插件适配与自研声明]</h4>
+                <ul class="steps-list" style="margin-top: 8px; font-size: 0.92rem; color: var(--text-secondary);">
+                    <li><strong>达芬奇插件为本项目独立自研开发</strong>：本工程中的达芬奇剪辑插件（<code>davinci-plugin/</code>）为本项目团队<strong>完全独立设计并原生开发</strong>（原版上游并未包含达芬奇插件）。目前<strong>明确仅适配 macOS 系统</strong>（支持 Apple Silicon 架构下的 Lua 原生引导、多轨时间线文字物理裁剪与延长对齐），暂未支持 Windows 达芬奇环境。</li>
+                    <li><strong>剪辑插件适配范围说明</strong>：当前版本<strong>仅适配 macOS 上的达芬奇 (DaVinci Resolve)</strong>；原版上游自带的 Premiere Pro (PR) UXP 插件目前在 Mac 下<strong>暂不可用</strong>（尚未做 Mac 系统与环境适配）。</li>
+                    <li><strong>关于原版 Windows 脚本等文件残留</strong>：仓库中仍保留有上游原版的 Windows 启动脚本（如 <code>.bat</code>、<code>MamboTTS.bat</code> 等）及辅助文件，为避免给原作者项目代码结构同步与维护造成麻烦，本分支不再做单独清理剔除，macOS 用户请统一使用对应的 <code>.command</code> 或 <code>.sh</code> 脚本。</li>
+                    <li><strong>开源协议遵循</strong>：本项目完全遵循原作者仓库的开源许可协议（<a href="https://github.com/qwertrewqwertrewq/MamboTTSforMac/blob/main/LICENSE" target="_blank" rel="noopener">MIT License</a>），遵循其上游许可与规范。</li>
+                </ul>
             </div>
 
             <div style="margin-top: 20px;" class="card">
@@ -623,11 +635,12 @@ cd MamboTTSforMac
     <footer>
         <div class="container">
             <div class="footer-links">
-                <a href="https://github.com/qwertrewqwertrewq/MamboTTSforMac" target="_blank" rel="noopener">GitHub 仓库</a>
+                <a href="https://github.com/qwertrewqwertrewq/MamboTTSforMac" target="_blank" rel="noopener">GitHub 仓库 (Mac 版)</a>
+                <a href="https://github.com/Tsukimisaka/MamboTTS" target="_blank" rel="noopener">上游原版仓库 (Tsukimisaka/MamboTTS)</a>
                 <a href="https://r2.rinku.dpdns.org/MamboTTSforMac-source.zip">源码包直链</a>
                 <a href="https://github.com/qwertrewqwertrewq/MamboTTSforMac/blob/main/LICENSE" target="_blank" rel="noopener">开源协议 (MIT)</a>
             </div>
-            <p>基于开源项目 MamboTTS 与 GPT-SoVITS 衍生开发。遵循相关开源许可协议。</p>
+            <p>本项目 Fork 自开源项目 <a href="https://github.com/Tsukimisaka/MamboTTS" target="_blank" rel="noopener">https://github.com/Tsukimisaka/MamboTTS</a>。达芬奇插件由本项目团队独立自研开发且明确仅适配 macOS；原版 PR 插件在 Mac 下暂不可用；仓库中保留有原版 Windows 脚本等文件未做清理。遵循原有 MIT 开源许可协议。</p>
             <div class="meta-status">
                 <span style="display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: #10b981;"></span>
                 <span>[服务节点: Cloudflare R2 / Pages 高速 CDN 运行中]</span>

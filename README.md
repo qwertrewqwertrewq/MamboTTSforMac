@@ -1,28 +1,41 @@
-<h1 align="center">MamboTTS for macOS & Windows</h1>
+<h1 align="center">MamboTTS for macOS</h1>
 
-<p align="center"><strong>面向解说与短视频创作场景的本地拟真语音合成工具与达芬奇 (DaVinci Resolve) 剪辑插件</strong></p>
+<p align="center"><strong>面向解说与短视频创作场景的 macOS 本地拟真语音合成工具与达芬奇 (DaVinci Resolve) 剪辑插件</strong></p>
+
+<p align="center">
+  本项目 Fork 自开源项目：<a href="https://github.com/Tsukimisaka/MamboTTS">https://github.com/Tsukimisaka/MamboTTS</a>
+</p>
 
 <p align="center">
   <a href="https://rinku.dpdns.org"><strong>[项目官网与架构介绍: rinku.dpdns.org]</strong></a>
 </p>
 
+> **重要说明**：
+> 1. **项目来源与协议**：本项目 Fork 自 [Tsukimisaka/MamboTTS](https://github.com/Tsukimisaka/MamboTTS)，完全遵循原有 [MIT 开源许可协议](LICENSE)；
+> 2. **达芬奇插件为本项目独立自研开发**：本仓库中的达芬奇剪辑插件（`davinci-plugin/`）为本项目**完全独立设计开发**（原版上游并未包含达芬奇插件），并且**明确仅适配 macOS**（针对 Apple Silicon 架构与 macOS 环境深度调优，暂未适配 Windows 达芬奇）；
+> 3. **插件支持范围**：当前版本**仅重点适配 macOS 上的达芬奇 (DaVinci Resolve)**；原版上游的 Premiere Pro (PR) UXP 插件在当前 Mac 环境下**暂不可用**；
+> 4. **关于历史文件残留**：仓库内保留有原版的部分 Windows 启动脚本（如 `.bat` 等相关文件），为避免给原作者项目代码结构同步与维护造成麻烦，本分支不再单独清理剔除，macOS 用户请统一使用对应的 `.command` 或 `.sh` 脚本。
+
+---
+
 <p align="center">
   <img src="https://img.shields.io/badge/macOS-Apple_Silicon-0A0A0B?style=flat-square" alt="macOS" />
-  <img src="https://img.shields.io/badge/Windows-10%2F11_64位-0A0A0B?style=flat-square" alt="Windows" />
-  <img src="https://img.shields.io/badge/GPU-Apple_MPS_%2F_NVIDIA-0A0A0B?style=flat-square" alt="GPU" />
+  <img src="https://img.shields.io/badge/DaVinci_Resolve-macOS_Only-0A0A0B?style=flat-square" alt="DaVinci Resolve" />
+  <img src="https://img.shields.io/badge/GPU-Apple_MPS-0A0A0B?style=flat-square" alt="GPU" />
   <img src="https://img.shields.io/badge/Engine-GPT--SoVITS-0A0A0B?style=flat-square" alt="GPT-SoVITS" />
   <img src="https://img.shields.io/badge/Version-v1.2.1_MacPro-0A0A0B?style=flat-square" alt="v1.2.1" />
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-0A0A0B?style=flat-square" alt="MIT" /></a>
 </p>
 
-> 基于 GPT-SoVITS，在本地 GPU（Apple Silicon MPS / NVIDIA CUDA）上毫秒级合成高质量拟真解说语音。不仅提供独立桌面客户端，还深度整合 **达芬奇 (DaVinci Resolve)** 剪辑轨，一键批量转换时间线文字为独立音频轨。
+> 基于 GPT-SoVITS，在 macOS 本地 GPU（Apple Silicon MPS）上毫秒级合成高质量拟真解说语音。不仅提供独立桌面客户端，还深度整合 **达芬奇 (DaVinci Resolve)** 剪辑轨（本项目独立自研开发，仅限 Mac），一键批量转换时间线文字为独立音频轨并支持物理裁剪与延长对齐。
 
 ---
 
 ## 项目官网与源码下载
 
+- **上游原始仓库 (Fork 来源)**：[https://github.com/Tsukimisaka/MamboTTS](https://github.com/Tsukimisaka/MamboTTS)
+- **本 Fork 仓库 (macOS 深度适配版)**：[https://github.com/qwertrewqwertrewq/MamboTTSforMac](https://github.com/qwertrewqwertrewq/MamboTTSforMac)
 - **官方网站 / 原理介绍**：[https://rinku.dpdns.org](https://rinku.dpdns.org)
-- **GitHub 源码仓库**：[https://github.com/qwertrewqwertrewq/MamboTTSforMac](https://github.com/qwertrewqwertrewq/MamboTTSforMac)
 - **源码包直链 (适合无 Git 用户)**：[https://rinku.dpdns.org/MamboTTSforMac-source.zip](https://rinku.dpdns.org/MamboTTSforMac-source.zip)
 
 ---
@@ -110,17 +123,22 @@ cd MamboTTSforMac
 
 MamboTTS 是 GPT-SoVITS 的 Windows 图形客户端与启动器。本仓库**不包含、也不修改** GPT-SoVITS 本体：引擎整合包在首次运行时从云端下载，客户端通过本地 HTTP API（`127.0.0.1:9880`）调用，接口契约见 `engine_contract.py`。
 
-## 编辑器扩展
+## 编辑器扩展说明
 
-仓库 `Premiere-Pro-UXP/` 目录提供用于 Premiere Pro 的 UXP 配音插件，由 [@2710165659](https://github.com/2710165659) 贡献，为独立于主客户端的编辑器扩展，适用于在 Premiere Pro 内发起配音与试听。
+- **达芬奇 (DaVinci Resolve) 插件**：**[本项目完全独立自研开发 · 仅适配 macOS]** 
+  - 本插件由本项目团队完全独立设计与原生开发（原版上游并未包含达芬奇插件功能）；
+  - **明确仅适配 macOS 系统**（针对 Apple Silicon 架构、macOS 原生 Lua 引导、多轨安全互斥锁定、自动物理裁剪与延长对齐做了全套调优）；暂未适配 Windows 达芬奇环境。
+- **Premiere Pro (PR) UXP 插件**：**[当前 Mac 版本暂不可用]** 
+  - 仓库中保留有原版来自 [@2710165659](https://github.com/2710165659) 的 `Premiere-Pro-UXP/` 目录；
+  - 该插件目前仅限 Windows 原版环境，**未对 macOS 进行运行与兼容适配，在当前 Mac 版本中暂不可使用**。
+- **关于历史 Windows 启动脚本等残留**：
+  - 仓库内仍保留有原版的部分 Windows 启动脚本（如 `MamboTTS.bat` 等），为避免给原作者项目代码结构同步与维护造成麻烦，本分支不再单独清理剔除，macOS 用户请统一使用对应的 `.command` 或 `.sh` 脚本。
 
-| 文件 / 目录 | 说明 |
-| --- | --- |
-| `index.html` / 相关 JS | 插件面板与逻辑 |
-| `styles.css` | 面板样式 |
-| `manifest.json` | UXP 插件清单 |
-| `install.ps1` | Windows 安装脚本 |
-| `preview-player/` | 基于 Rust 的预览播放器 |
+| 模块 / 扩展 | 开发来源 | 适配平台 | 支持状态与说明 |
+| --- | --- | --- | --- |
+| 达芬奇 (DaVinci Resolve) 插件 | **本项目独立自研开发** | **仅限 macOS** (Apple Silicon) | **支持**（时间线字幕与 Text+ 智能提取、音频自动排入、双向裁剪延长对齐） |
+| Premiere Pro UXP 插件 | 原版上游贡献 | Windows (原版) | **Mac 下暂不可用**（尚未做 macOS 运行与环境适配） |
+| 原版 Windows 启动脚本 (.bat) | 原版上游保留 | Windows | **保留遗留**（为避免同步麻烦保留原样，不单独清理） |
 
 Premiere Pro 为 Adobe 商标，本项目与其不存在隶属或背书关系。
 
@@ -147,8 +165,9 @@ Premiere Pro 为 Adobe 商标，本项目与其不存在隶属或背书关系。
 
 ## 致谢与许可
 
-引擎基于 [RVC-Boss/GPT-SoVITS](https://github.com/RVC-Boss/GPT-SoVITS)。
-
-感谢 [@2710165659](https://github.com/2710165659) 贡献的 Premiere Pro UXP 插件支持。
-
-本项目基于 [MIT](LICENSE) 许可开源；GPT-SoVITS 引擎本体遵循其上游许可。
+- 本项目 Fork 自 [Tsukimisaka/MamboTTS](https://github.com/Tsukimisaka/MamboTTS)，感谢原作者在 Windows 客户端与曼波模型调优上的优秀开源工作。
+- 达芬奇剪辑插件（`davinci-plugin/`）为本项目完全独立设计与原生开发，明确仅适配 macOS。
+- 仓库内仍保留原版的部分 Windows 启动脚本与 PR 插件文件，为避免维护麻烦未做额外清理，项目完全继承并遵循其原有 [MIT 许可协议](LICENSE)。
+- 引擎基于 [RVC-Boss/GPT-SoVITS](https://github.com/RVC-Boss/GPT-SoVITS)。
+- 感谢 [@2710165659](https://github.com/2710165659) 贡献的 Premiere Pro UXP 插件历史源码。
+- 本项目与 GPT-SoVITS 引擎本体均遵循对应开源许可。
