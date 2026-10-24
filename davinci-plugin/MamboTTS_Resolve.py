@@ -14,6 +14,7 @@ MamboTTS 配音助手 for DaVinci Resolve (达芬奇)
 
 import os
 import sys
+import re
 import time
 import json
 import wave
@@ -23,6 +24,7 @@ import traceback
 import subprocess
 import urllib.request
 import urllib.parse
+from html.parser import HTMLParser
 from datetime import datetime
 
 # ==============================================================================
@@ -487,11 +489,137 @@ def extend_timeline_clip(timeline, track_type, track_index, clip_start, clip_end
 
 
 # ==============================================================================
-# 时间线文本提取与重叠判定逻辑
+# 时间线文本提取与常规标题解析逻辑
 # ==============================================================================
 
-def extract_timeline_texts(timeline):
-    """提取时间线上的所有字幕轨与 Text+ 片段，附带剪辑对象引用"""
+class CleanHTMLTextExtractor(HTMLParser):
+    """提取 HTML 标签中的可读文本，忽略 style, script, head 等样式与元数据"""
+    def __init__(self):
+        super().__init__()
+        self.texts = []
+        self.ignore = False
+
+    def handle_starttag(self, tag, attrs):
+        if tag.lower() in ("style", "script", "head"):
+            self.ignore = True
+
+    def handle_endtag(self, tag):
+        if tag.lower() in ("style", "script", "head"):
+            self.ignore = False
+
+    def handle_data(self, data):
+        if not self.ignore:
+            t = data.strip()
+            if t:
+                self.texts.append(t)
+
+    def get_text(self):
+        return " ".join(self.texts)
+
+
+def extract_text_from_html(html_str):
+    """解析富文本 HTML 字符串为纯文本台词"""
+    if not html_str:
+        return ""
+    p = CleanHTMLTextExtractor()
+    try:
+        p.feed(html_str)
+        return p.get_text().strip()
+    except Exception:
+        return ""
+
+
+def is_template_or_media_name(name):
+    """检测片段名称是否属于内置模板、生成器或音视频媒体文件名（避免误将模板名作为台词朗读）"""
+    if not name:
+        return True
+    lower = name.lower().strip()
+    media_exts = (
+        ".mp4", ".mov", ".mkv", ".avi", ".flv", ".webm",
+        ".png", ".jpg", ".jpeg", ".tiff", ".bmp", ".psd",
+        ".wav", ".mp3", ".aac", ".m4a", ".flac", ".aif", ".aiff"
+    )
+    if any(lower.endswith(ext) for ext in media_exts):
+        return True
+
+    patterns = [
+        r"字幕条", r"标题", r"title", r"lower third", r"scroll", r"滚动",
+        r"text\+?", r"文本", r"富文本", r"rich text", r"rich lower",
+        r"adjustment", r"调整片段", r"fusion", r"generator", r"生成器",
+        r"solid color", r"单色"
+    ]
+    for pat in patterns:
+        if re.search(pat, lower):
+            return True
+    return False
+
+
+def get_otio_title_map(timeline, resolve):
+    """
+    通过导出临时 OTIO 文件解析达芬奇常规标题（非 Fusion/Text+，如中下方字幕条、文本等）的富文本参数。
+    Resolve 原生导出 OTIO 耗时通常在 30ms 左右，解析后立即自动删除临时文件。
+    返回映射: {(track_index, rel_start_frame): combined_text}
+    """
+    title_map = {}
+    if not timeline or not resolve:
+        return title_map
+    if not hasattr(resolve, "EXPORT_OTIO"):
+        return title_map
+
+    tmp_path = os.path.join(tempfile.gettempdir(), f"mambotts_temp_{os.getpid()}_{int(time.time()*1000)}.otio")
+    try:
+        export_ok = timeline.Export(tmp_path, resolve.EXPORT_OTIO)
+        if export_ok and os.path.exists(tmp_path):
+            with open(tmp_path, "r", encoding="utf-8") as f:
+                data = json.loads(f.read())
+
+            video_tracks = [t for t in data.get("tracks", {}).get("children", []) if t.get("kind") == "Video"]
+            for v_idx, vt in enumerate(video_tracks):
+                track_num = v_idx + 1
+                curr_frame = 0.0
+                for child in vt.get("children", []):
+                    schema = child.get("OTIO_SCHEMA", "")
+                    sr = child.get("source_range", {})
+                    dur = sr.get("duration", {}).get("value", 0.0)
+                    start_frame = round(curr_frame)
+                    curr_frame += dur
+
+                    if schema.startswith("Gap"):
+                        continue
+
+                    texts = []
+                    media_refs = child.get("media_references", {})
+                    for ref_k, ref_v in media_refs.items():
+                        if not isinstance(ref_v, dict):
+                            continue
+                        params = ref_v.get("parameters", {}).get("Resolve_OTIO", [])
+                        for p_group in params:
+                            for p in p_group.get("Parameters", []):
+                                for k, v in p.items():
+                                    if "Title HTML" in k and isinstance(v, str):
+                                        txt = extract_text_from_html(v)
+                                        if txt:
+                                            texts.append(txt)
+
+                    combined_text = " ".join(texts).strip()
+                    if combined_text:
+                        title_map[(track_num, start_frame)] = combined_text
+    except Exception as e:
+        write_log(f"OTIO 解析标题异常: {e}")
+    finally:
+        if os.path.exists(tmp_path):
+            try:
+                os.remove(tmp_path)
+            except Exception:
+                pass
+    return title_map
+
+
+def extract_timeline_texts(timeline, resolve=None):
+    """提取时间线上的所有字幕轨与 Text+ / 常规标题片段，附带剪辑对象引用"""
+    if not resolve:
+        resolve = get_resolve()
+
     items_data = []
 
     # 1. 字幕轨 (Subtitle Tracks)
@@ -505,7 +633,7 @@ def extract_timeline_texts(timeline):
             end = clip.GetEnd()
             dur = clip.GetDuration()
             text = name.strip()
-            if text:
+            if text and not is_template_or_media_name(text):
                 items_data.append({
                     "track_type": "subtitle",
                     "track_index": track_idx,
@@ -517,7 +645,10 @@ def extract_timeline_texts(timeline):
                     "clip_obj": clip,
                 })
 
-    # 2. 视频轨上的 Text+ (Fusion 标题)
+    # 2. 视频轨上的 Text+ 与常规标题模板
+    tl_start = timeline.GetStartFrame() or 0
+    otio_title_map = get_otio_title_map(timeline, resolve)
+
     video_track_count = timeline.GetTrackCount("video") or 0
     for track_idx in range(1, video_track_count + 1):
         track_name = timeline.GetTrackName("video", track_idx) or f"Video {track_idx}"
@@ -527,9 +658,10 @@ def extract_timeline_texts(timeline):
             start = clip.GetStart()
             end = clip.GetEnd()
             dur = clip.GetDuration()
+            rel_start = start - tl_start
             text_found = ""
 
-            # 探测 Fusion Comp 中的 StyledText
+            # 探测 Fusion Comp 中的 StyledText (Text+)
             comp_count = clip.GetFusionCompCount() or 0
             if comp_count > 0:
                 comp = clip.GetFusionCompByIndex(1)
@@ -541,11 +673,18 @@ def extract_timeline_texts(timeline):
                             text_found = str(styled_text).strip()
                             break
 
-            # 若未从 Fusion 找到，检查 clip 名字是否是文字内容
+            # 若未从 Fusion 找到，尝试从 OTIO 导出的参数中匹配 Title HTML (中下方字幕条、文本等常规标题)
+            if not text_found and otio_title_map:
+                for delta in (0, -1, 1, -2, 2):
+                    key = (track_idx, rel_start + delta)
+                    if key in otio_title_map:
+                        text_found = otio_title_map[key]
+                        break
+
+            # 若仍未找到，仅当 clip 名称不是模板、生成器或媒体文件名时，才作为备用台词
             if not text_found:
-                if name and not any(name.lower().endswith(ext) for ext in (".mp4", ".mov", ".mkv", ".png", ".jpg", ".jpeg", ".wav", ".mp3", ".aac")):
-                    if name not in ("Text+", "Title", "字幕", "标题", "Adjustment Clip"):
-                        text_found = name.strip()
+                if not is_template_or_media_name(name):
+                    text_found = name.strip()
 
             if text_found:
                 items_data.append({
@@ -804,11 +943,11 @@ def run_gui():
     def refresh_scanned_items():
         nonlocal scanned_items
         clip_tree.Clear()
-        log("正在扫描时间线字幕轨与 Text+ 文字片段...")
-        scanned_items = extract_timeline_texts(timeline)
+        log("正在扫描时间线字幕轨与 Text+ / 标题片段...")
+        scanned_items = extract_timeline_texts(timeline, resolve=resolve)
         if not scanned_items:
-            log("[警告] 未在当前时间线上检测到任何字幕或 Text+ 片段！")
-            status_label.Text = "<font color='#EF4444'>未检测到任何文字片段，请确保时间线上有 Text+ 或字幕轨</font>"
+            log("[警告] 未在当前时间线上检测到任何填有文本的字幕或标题片段！")
+            status_label.Text = "<font color='#EF4444'>未检测到任何文字片段，请确保时间线上有 Text+、标题或字幕轨且已输入文本</font>"
             return
 
         for idx, item in enumerate(scanned_items, 1):
