@@ -1,0 +1,8 @@
+{
+  "version": "0.1.1",
+  "min_version": "0.1.0",
+  "release_date": "2026-10-24",
+  "release_notes": "1. 达芬奇配音插件支持字幕独立勾选、全选与反选\n2. 达芬奇配音插件支持编辑单个字幕纠正发音(不修改时间线原文本)\n3. 达芬奇配音插件支持按指定字数智能拆分字幕轨道(先对齐后拆分编辑)\n4. 主客户端面板展示版本号并支持自动与手动更新检查提示",
+  "download_url": "https://pub-a620c95840e14c5da4be27858c45770f.r2.dev/MamboTTSforMac-source.zip",
+  "github_url": "https://github.com/qwertrewqwertrewq/MamboTTSforMac"
+}

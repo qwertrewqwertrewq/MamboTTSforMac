@@ -488,6 +488,135 @@ def extend_timeline_clip(timeline, track_type, track_index, clip_start, clip_end
             timeline.SetTrackLock(tt, t_idx, orig_locked)
 
 
+def split_text_into_chunks(text, max_chars=8):
+    """
+    智能按最大字数切分台词：
+    优先按标点符号自然断句；若单句仍超过 max_chars，则按字数均匀切片。
+    """
+    if not text or len(text) <= max_chars:
+        return [text] if text else []
+
+    parts = re.split(r'([，,。!！?？；;\s]+)', text)
+    chunks = []
+    curr = ""
+    for part in parts:
+        if not part:
+            continue
+        if len(curr) + len(part) <= max_chars:
+            curr += part
+        else:
+            if curr.strip():
+                chunks.append(curr.strip())
+            curr = part
+
+    if curr.strip():
+        chunks.append(curr.strip())
+
+    final_chunks = []
+    for c in chunks:
+        if len(c) <= max_chars:
+            final_chunks.append(c)
+        else:
+            n = (len(c) + max_chars - 1) // max_chars
+            step = len(c) / n
+            for i in range(n):
+                sub = c[int(round(i * step)): int(round((i + 1) * step))].strip()
+                if sub:
+                    final_chunks.append(sub)
+
+    return final_chunks or [text]
+
+
+def split_timeline_clip_by_length(timeline, track_type, track_index, clip_start, clip_end, text, max_chars, fps, log_fn=None):
+    """
+    在文字片段已完成音频对齐后，按指定字数智能拆分时间线文字轨道（先对齐后拆分编辑）。
+    自动锁定保护非目标轨道，并在拆分后尝试同步更新 Text+ 子片段台词。
+    """
+    if log_fn is None:
+        log_fn = print
+
+    if not text or len(text) <= max_chars:
+        return True
+
+    chunks = split_text_into_chunks(text, max_chars)
+    if len(chunks) <= 1:
+        return True
+
+    total_chars = sum(len(c) for c in chunks)
+    total_dur = clip_end - clip_start
+    if total_dur < len(chunks) * 3:
+        log_fn(f"[提示] 片段时长过短 ({total_dur}帧)，跳过按字数拆分")
+        return False
+
+    drop_frame = str(timeline.GetSetting("timelineDropFrameTimecode") or "").strip().lower() in ("1", "true")
+
+    # 1. 记录所有轨道锁定状态，并临时锁定其他所有轨道
+    locked_states = {}
+    for tt in ["video", "audio", "subtitle"]:
+        count = timeline.GetTrackCount(tt) or 0
+        for t_idx in range(1, count + 1):
+            is_locked = timeline.GetIsTrackLocked(tt, t_idx)
+            locked_states[(tt, t_idx)] = is_locked
+            if (tt, t_idx) != (track_type, track_index) and not is_locked:
+                timeline.SetTrackLock(tt, t_idx, True)
+            if (tt, t_idx) == (track_type, track_index) and is_locked:
+                timeline.SetTrackLock(tt, t_idx, False)
+
+    try:
+        # 2. 计算各个分割点的目标帧
+        accum_chars = 0
+        cut_frames = []
+        for i in range(len(chunks) - 1):
+            accum_chars += len(chunks[i])
+            c_frame = clip_start + round(total_dur * (accum_chars / total_chars))
+            if clip_start + 2 < c_frame < clip_end - 2:
+                if not cut_frames or c_frame > cut_frames[-1] + 2:
+                    cut_frames.append(c_frame)
+
+        if not cut_frames:
+            return True
+
+        # 3. 逐点切割
+        for cut_f in cut_frames:
+            tc = frames_to_timecode(cut_f, fps, drop_frame=drop_frame)
+            timeline.SetCurrentTimecode(tc)
+            time.sleep(0.06)
+            cmd = '''osascript -e 'tell application "DaVinci Resolve" to activate' -e 'tell application "System Events" to keystroke "b" using {command down}' '''
+            subprocess.run(cmd, shell=True, capture_output=True, text=True)
+            time.sleep(0.06)
+
+        log_fn(f"[拆分] 成功按每段约 {max_chars} 字将轨道 {track_type}{track_index} 文字拆分为 {len(cut_frames) + 1} 个子片段")
+
+        # 4. 若为 Text+，更新拆分后各个子片段的 StyledText 内容
+        time.sleep(0.08)
+        sub_clips = [c for c in (timeline.GetItemListInTrack(track_type, track_index) or [])
+                     if c.GetStart() >= clip_start - 2 and c.GetEnd() <= clip_end + 2]
+        sub_clips.sort(key=lambda x: x.GetStart())
+
+        if len(sub_clips) == len(chunks):
+            for idx, sc in enumerate(sub_clips):
+                if sc.GetFusionCompCount() > 0:
+                    try:
+                        comp = sc.GetFusionCompByIndex(1)
+                        if comp:
+                            tools = comp.GetToolList() or {}
+                            for t_name, t_obj in tools.items():
+                                if hasattr(t_obj, "GetInput") and t_obj.GetInput("StyledText") is not None:
+                                    t_obj.SetInput("StyledText", chunks[idx])
+                                    break
+                    except Exception as e:
+                        write_log(f"更新 Text+ 子片段文字失败: {e}")
+
+        return True
+    except Exception as e:
+        log_fn(f"[错误] 自动拆分文字轨道异常: {e}")
+        return False
+    finally:
+        # 恢复所有轨道锁定状态
+        for (tt, t_idx), orig_locked in locked_states.items():
+            timeline.SetTrackLock(tt, t_idx, orig_locked)
+
+
 # ==============================================================================
 # 时间线文本提取与常规标题解析逻辑
 # ==============================================================================
@@ -800,8 +929,8 @@ def run_gui():
     # 布局定义
     win = dispatcher.AddWindow({
         "ID": winID,
-        "WindowTitle": f"MamboTTS 曼波自动配音助手 - [{timeline_name}]",
-        "Geometry": [220, 120, 840, 640],
+        "WindowTitle": f"MamboTTS 曼波自动配音助手 v0.1.1 - [{timeline_name}]",
+        "Geometry": [180, 80, 940, 720],
     }, ui.VGroup([
         # 1. 顶部状态栏
         ui.HGroup({"Weight": 0}, [
@@ -836,7 +965,7 @@ def run_gui():
             ui.Button({"ID": "RefreshBtn", "Text": "重新扫描文字轨", "Weight": 0.4}),
         ]),
 
-        # 3. 控制参数行 2：对齐与重叠设置 (新增功能)
+        # 3. 控制参数行 2：对齐与重叠设置
         ui.HGroup({"Weight": 0}, [
             ui.CheckBox({
                 "ID": "AutoTrimCheck",
@@ -850,17 +979,60 @@ def run_gui():
             ui.HGap(15),
             ui.CheckBox({
                 "ID": "OverlapTrackCheck",
-                "Text": "遇到重叠时新建轨道放置 (默认覆盖)",
+                "Text": "遇到重叠时新建音频轨放置",
                 "Checked": False,
                 "Weight": 0
             }),
         ]),
 
-        # 4. 提取的台词表格
-        ui.Label({"Text": "<b>时间线扫描到的台词片段预览：</b>", "Weight": 0}),
-        ui.Tree({"ID": "ClipTree", "Weight": 1.2}),
+        # 4. 控制参数行 3：按字数自动拆分字幕轨道 (先对齐后拆分编辑)
+        ui.HGroup({"Weight": 0}, [
+            ui.CheckBox({
+                "ID": "AutoSplitCheck",
+                "Text": "按指定字数自动拆分字幕轨道 (先对齐后拆分编辑)",
+                "Checked": False,
+                "Weight": 0
+            }),
+            ui.HGap(8),
+            ui.Label({"Text": "单段字数上限:", "Weight": 0}),
+            ui.SpinBox({
+                "ID": "SplitCharSpin",
+                "Value": 8,
+                "Minimum": 3,
+                "Maximum": 50,
+                "Weight": 0
+            }),
+            ui.Label({"Text": "字", "Weight": 0}),
+            ui.HGap(15),
+            ui.Label({"Text": "<font color='#888888'>* 优先在标点处自然断句，长句按设定字数均匀拆分</font>", "Weight": 1}),
+        ]),
 
-        # 5. 实时日志预览窗口
+        # 5. 台词片段列表与勾选工具栏
+        ui.HGroup({"Weight": 0}, [
+            ui.Label({"Text": "<b>时间线台词片段列表 (可单独勾选配音)：</b>", "Weight": 1}),
+            ui.Button({"ID": "SelectAllBtn", "Text": "全选", "Weight": 0}),
+            ui.HGap(6),
+            ui.Button({"ID": "DeselectAllBtn", "Text": "取消全选", "Weight": 0}),
+            ui.HGap(6),
+            ui.Button({"ID": "InvertBtn", "Text": "反选", "Weight": 0}),
+        ]),
+        ui.Tree({"ID": "ClipTree", "Weight": 1.3}),
+
+        # 6. 单句发音修正输入栏 (不修改原字幕只作用于读音)
+        ui.HGroup({"Weight": 0}, [
+            ui.Label({"Text": "发音纠错 (仅修改朗读，不改原字幕):", "Weight": 0}),
+            ui.LineEdit({
+                "ID": "PhoneticEdit",
+                "PlaceholderText": "在列表中点击选中任意台词，在此修改纠正发音或多音字...",
+                "Weight": 1
+            }),
+            ui.HGap(6),
+            ui.Button({"ID": "ApplyPhoneticBtn", "Text": "应用读音修改", "Weight": 0}),
+            ui.HGap(6),
+            ui.Button({"ID": "ResetPhoneticBtn", "Text": "恢复原台词", "Weight": 0}),
+        ]),
+
+        # 7. 实时日志预览窗口
         ui.Label({"Text": "<b>操作日志与运行状态：</b>", "Weight": 0}),
         ui.TextEdit({
             "ID": "LogBox",
@@ -869,7 +1041,7 @@ def run_gui():
             "Font": ui.Font({"Family": "Menlo", "PixelSize": 11})
         }),
 
-        # 6. 底部按钮与状态
+        # 8. 底部按钮与状态
         ui.HGroup({"Weight": 0}, [
             ui.Label({"ID": "StatusText", "Text": "就绪", "Weight": 1}),
             ui.Button({
@@ -890,7 +1062,15 @@ def run_gui():
     auto_trim_check = win.Find("AutoTrimCheck")
     align_combo = win.Find("AlignCombo")
     overlap_track_check = win.Find("OverlapTrackCheck")
+    auto_split_check = win.Find("AutoSplitCheck")
+    split_char_spin = win.Find("SplitCharSpin")
+    select_all_btn = win.Find("SelectAllBtn")
+    deselect_all_btn = win.Find("DeselectAllBtn")
+    invert_btn = win.Find("InvertBtn")
     clip_tree = win.Find("ClipTree")
+    phonetic_edit = win.Find("PhoneticEdit")
+    apply_phonetic_btn = win.Find("ApplyPhoneticBtn")
+    reset_phonetic_btn = win.Find("ResetPhoneticBtn")
     log_box = win.Find("LogBox")
     status_label = win.Find("StatusText")
     generate_btn = win.Find("GenerateBtn")
@@ -935,14 +1115,30 @@ def run_gui():
     refresh_tracks()
 
     # 初始化表格
-    clip_tree.ColumnCount = 4
-    clip_tree.SetHeaderLabels(["序号", "来源轨道", "时间码范围 (帧)", "台词文字内容"])
+    clip_tree.ColumnCount = 5
+    clip_tree.SetHeaderLabels(["勾选", "来源轨道", "时间码范围 (帧)", "原字幕内容", "配音读音文本 (选中可改读法)"])
+    clip_tree.ColumnWidth[0] = 70
+    clip_tree.ColumnWidth[1] = 130
+    clip_tree.ColumnWidth[2] = 180
+    clip_tree.ColumnWidth[3] = 250
+    clip_tree.ColumnWidth[4] = 270
 
     scanned_items = []
+    tree_rows = []
+    current_edit_idx = None
+
+    def update_selected_count_label():
+        sel_count = sum(1 for r in tree_rows if r.CheckState[0] == "Checked")
+        total = len(tree_rows)
+        status_label.Text = f"已就绪：已勾选 {sel_count} / {total} 条文字片段"
 
     def refresh_scanned_items():
-        nonlocal scanned_items
+        nonlocal scanned_items, tree_rows, current_edit_idx
         clip_tree.Clear()
+        tree_rows.clear()
+        current_edit_idx = None
+        phonetic_edit.Text = ""
+
         log("正在扫描时间线字幕轨与 Text+ / 标题片段...")
         scanned_items = extract_timeline_texts(timeline, resolve=resolve)
         if not scanned_items:
@@ -951,16 +1147,20 @@ def run_gui():
             return
 
         for idx, item in enumerate(scanned_items, 1):
+            item["spoken_text"] = item.get("spoken_text") or item["text"]
             row = clip_tree.NewItem()
             row.Text[0] = str(idx)
+            row.CheckState[0] = "Checked"
             row.Text[1] = f"{item['track_name']} ({item['track_type']})"
             row.Text[2] = f"{item['start_frame']} ~ {item['end_frame']} ({item['duration_frames']}帧)"
             row.Text[3] = item["text"]
+            row.Text[4] = item["spoken_text"]
             clip_tree.AddTopLevelItem(row)
+            tree_rows.append(row)
 
         msg = f"扫描完毕：共找到 {len(scanned_items)} 条文字片段。"
         log(f"[成功] {msg}")
-        status_label.Text = f"已就绪：共检测到 {len(scanned_items)} 条文字片段"
+        update_selected_count_label()
 
     def update_engine_status():
         online = is_engine_online()
@@ -1013,6 +1213,69 @@ def run_gui():
         refresh_scanned_items()
         update_engine_status()
 
+    def on_select_all(ev):
+        for r in tree_rows:
+            r.CheckState[0] = "Checked"
+        update_selected_count_label()
+        log("[选择] 已全选所有台词片段")
+
+    def on_deselect_all(ev):
+        for r in tree_rows:
+            r.CheckState[0] = "Unchecked"
+        update_selected_count_label()
+        log("[选择] 已取消全选所有台词片段")
+
+    def on_invert_selection(ev):
+        for r in tree_rows:
+            is_chk = (r.CheckState[0] == "Checked")
+            r.CheckState[0] = "Unchecked" if is_chk else "Checked"
+        update_selected_count_label()
+        log("[选择] 已反选台词片段勾选状态")
+
+    def on_tree_item_clicked(ev):
+        nonlocal current_edit_idx
+        item = ev.get("item")
+        if not item:
+            return
+        idx = clip_tree.IndexOfTopLevelItem(item)
+        if 0 <= idx < len(scanned_items):
+            current_edit_idx = idx
+            target_text = scanned_items[idx].get("spoken_text") or scanned_items[idx].get("text", "")
+            phonetic_edit.Text = target_text
+            status_label.Text = f"正在编辑第 {idx + 1} 条台词发音修正..."
+
+    def on_tree_item_changed(ev):
+        update_selected_count_label()
+
+    def on_apply_phonetic(ev):
+        nonlocal current_edit_idx
+        if current_edit_idx is None or not (0 <= current_edit_idx < len(scanned_items)):
+            log("[提示] 请先在列表中点击选中一条需要修改读音的台词片段")
+            return
+        new_text = phonetic_edit.Text.strip()
+        if not new_text:
+            log("[警告] 读音修正文本不能为空！")
+            return
+        scanned_items[current_edit_idx]["spoken_text"] = new_text
+        orig_text = scanned_items[current_edit_idx]["text"]
+        row = tree_rows[current_edit_idx]
+        if new_text != orig_text:
+            row.Text[4] = f"{new_text} [已纠正]"
+        else:
+            row.Text[4] = new_text
+        log(f"[修正] 第 {current_edit_idx + 1} 条读音已修正为: \"{new_text}\" (原字幕内容保持不变)")
+
+    def on_reset_phonetic(ev):
+        nonlocal current_edit_idx
+        if current_edit_idx is None or not (0 <= current_edit_idx < len(scanned_items)):
+            log("[提示] 请先在列表中点击选中一条需要恢复读音的台词片段")
+            return
+        orig_text = scanned_items[current_edit_idx]["text"]
+        scanned_items[current_edit_idx]["spoken_text"] = orig_text
+        tree_rows[current_edit_idx].Text[4] = orig_text
+        phonetic_edit.Text = orig_text
+        log(f"[恢复] 第 {current_edit_idx + 1} 条已恢复原字幕读音: \"{orig_text}\"")
+
     def on_generate(ev):
         if not is_engine_online():
             show_native_alert("提示", "MamboTTS 引擎尚未运行！请先启动引擎。", is_error=True)
@@ -1021,11 +1284,24 @@ def run_gui():
             show_native_alert("提示", "当前没有检测到任何台词文本，无法配音！", is_error=True)
             return
 
+        # 筛选勾选的台词
+        items_to_process = []
+        for idx, (item, row) in enumerate(zip(scanned_items, tree_rows)):
+            if row.CheckState[0] == "Checked":
+                items_to_process.append((idx + 1, item))
+
+        if not items_to_process:
+            log("[警告] 未在列表中勾选任何台词片段！请勾选至少一条片段后再开始生成。")
+            show_native_alert("未勾选台词", "请在列表中勾选至少一条需要配音的台词片段！", is_error=False)
+            return
+
         speed_val = speeds[speed_combo.CurrentIndex][1]
         sel_track_idx = track_combo.CurrentIndex
         do_auto_trim = bool(auto_trim_check.Checked)
         align_mode = "left" if align_combo.CurrentIndex == 0 else "right"
         allow_new_track_on_overlap = bool(overlap_track_check.Checked)
+        do_auto_split = bool(auto_split_check.Checked)
+        max_split_chars = int(split_char_spin.Value or 8)
         initial_timecode = timeline.GetCurrentTimecode()
 
         # 确定基准目标音频轨
@@ -1055,26 +1331,31 @@ def run_gui():
 
         media_pool.SetCurrentFolder(mambo_folder)
 
-        total = len(scanned_items)
+        total = len(items_to_process)
         success_count = 0
         align_text = "左对齐" if align_mode == "left" else "右对齐"
         trim_desc = f"自动裁剪/延长文字轨 ({align_text})" if do_auto_trim else "保持文字原长"
+        split_desc = f" | 按 {max_split_chars} 字自动拆分轨道" if do_auto_split else ""
         overlap_desc = "新建分轨放置" if allow_new_track_on_overlap else "默认同轨覆盖"
 
-        log(f"开始批量处理共 {total} 个片段 | 语速: {speed_val}x | {trim_desc} | 重叠处理: {overlap_desc}")
+        log(f"开始批量处理勾选的 {total} 个片段 | 语速: {speed_val}x | {trim_desc}{split_desc} | 重叠处理: {overlap_desc}")
 
         # 记录已分配轨道的占用区间: {track_index: [(start_frame, end_frame), ...]}
         allocated_intervals = {base_target_track: []}
 
-        for i, item in enumerate(scanned_items, 1):
-            short_text = item['text'][:20] + ("..." if len(item['text']) > 20 else "")
-            status_label.Text = f"正在处理 [{i}/{total}]: {short_text}"
-            log(f"[{i}/{total}] 调用 GPT-SoVITS 合成: 「{short_text}」")
+        for i, (orig_no, item) in enumerate(items_to_process, 1):
+            spoken_text = item.get("spoken_text") or item["text"]
+            short_spoken = spoken_text[:20] + ("..." if len(spoken_text) > 20 else "")
+            status_label.Text = f"正在处理 [{i}/{total}]: {short_spoken}"
+            if spoken_text != item["text"]:
+                log(f"[{i}/{total}] 调用 GPT-SoVITS 合成纠正读音: 「{short_spoken}」(原文字: {item['text']})")
+            else:
+                log(f"[{i}/{total}] 调用 GPT-SoVITS 合成: 「{short_spoken}」")
 
-            wav_name = f"mambo_{item['start_frame']}_{i}.wav"
+            wav_name = f"mambo_{item['start_frame']}_{orig_no}.wav"
             wav_path = os.path.join(cache_dir, wav_name)
 
-            ok, err_msg = synthesize_speech(item["text"], wav_path, speed=speed_val)
+            ok, err_msg = synthesize_speech(spoken_text, wav_path, speed=speed_val)
             if not ok:
                 log(f"[失败] [{i}/{total}] 合成失败: {err_msg}")
                 continue
@@ -1116,7 +1397,6 @@ def run_gui():
 
             # 3. 重叠检测与轨道分配
             if not allow_new_track_on_overlap:
-                # 默认行为：同轨覆盖
                 assigned_track = base_target_track
             else:
                 # 勾选了遇到重叠时新建轨道：查找无重叠轨道，或新建轨道
@@ -1163,17 +1443,21 @@ def run_gui():
             else:
                 log(f"[警告] [{i}/{total}] 插入时间线返回空，请检查轨道是否被锁定")
 
+            res_track_type = "subtitle" if item["track_type"] == "subtitle" else "video"
+
             # 5. 执行文字轨道物理对齐 (智能裁剪或延长)
+            aligned_clip_end = text_end
             if do_auto_trim:
-                res_track_type = "subtitle" if item["track_type"] == "subtitle" else "video"
                 if dur_frames < text_dur:
                     # 音频短于文字：裁剪缩减文字片段
                     if align_mode == "left":
                         cut_frame = text_start + dur_frames
                         is_tail = True
+                        aligned_clip_end = cut_frame
                     else:
                         cut_frame = record_frame
                         is_tail = False
+                        aligned_clip_end = text_end
 
                     trim_ok = trim_timeline_clip(
                         timeline=timeline,
@@ -1208,6 +1492,7 @@ def run_gui():
                     # 音频长于文字：自动延长文字片段至音频结束
                     if align_mode == "left":
                         target_end = text_start + dur_frames
+                        aligned_clip_end = target_end
                         extend_timeline_clip(
                             timeline=timeline,
                             track_type=res_track_type,
@@ -1231,7 +1516,22 @@ def run_gui():
                     else:
                         log(f"[提示] 右对齐模式下音频长于文字，已以文字终点为基准对齐 (帧 {record_frame} ~ {text_end})")
                 else:
+                    aligned_clip_end = text_end
                     log(f"[对齐] 音频时长 ({dur_frames}帧) 与文字原长完全一致，无需调整")
+
+            # 6. 执行按指定字数智能拆分字幕轨道 (先对齐后拆分编辑)
+            if do_auto_split:
+                split_timeline_clip_by_length(
+                    timeline=timeline,
+                    track_type=res_track_type,
+                    track_index=item["track_index"],
+                    clip_start=text_start,
+                    clip_end=aligned_clip_end,
+                    text=item["text"],
+                    max_chars=max_split_chars,
+                    fps=fps,
+                    log_fn=log,
+                )
 
         # 恢复播放头初始位置
         if initial_timecode:
@@ -1258,6 +1558,15 @@ def run_gui():
     win.On["StartEngineBtn"].Clicked = on_start_engine
     win.On["GenerateBtn"].Clicked = on_generate
     win.On["AutoTrimCheck"].Clicked = on_auto_trim_toggled
+    win.On["SelectAllBtn"].Clicked = on_select_all
+    win.On["DeselectAllBtn"].Clicked = on_deselect_all
+    win.On["InvertBtn"].Clicked = on_invert_selection
+    win.On["ApplyPhoneticBtn"].Clicked = on_apply_phonetic
+    win.On["ResetPhoneticBtn"].Clicked = on_reset_phonetic
+    win.On["ClipTree"].ItemClicked = on_tree_item_clicked
+    win.On["ClipTree"].ItemDoubleClicked = on_tree_item_clicked
+    win.On["ClipTree"].CurrentItemChanged = on_tree_item_clicked
+    win.On["ClipTree"].ItemChanged = on_tree_item_changed
 
     # 首次自动检测与扫描
     update_engine_status()

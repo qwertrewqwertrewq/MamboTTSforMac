@@ -27,9 +27,9 @@ from config_store import load as load_config_file, save as save_config_file
 import history_store
 from history_widget import HistoryItemWidget
 
-# 当前版本号，用于 GitHub 新版本检查
-CURRENT_VERSION = "v1.2.1"
-GITHUB_REPO = "Tsukimisaka/MamboTTS"
+# 当前版本号，用于 GitHub / R2 新版本检查与自动提示
+CURRENT_VERSION = "0.1.1"
+GITHUB_REPO = "qwertrewqwertrewq/MamboTTSforMac"
 
 # 配置文件路径：与 app.py 同目录，便于携带
 CONFIG_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "config.json")
@@ -77,7 +77,8 @@ class MamboTTSApp(QMainWindow):
     # 严禁直接触碰控件（QTimer.singleShot 在无事件循环的线程里不会触发）。
     log_line = Signal(str, str)          # (level, message)
     engine_log_line = Signal(str)        # 引擎子进程原始日志行
-    update_found = Signal(str, str)      # (latest_tag, release_url)
+    update_found = Signal(str, str, str)      # (latest_tag, release_url, release_notes)
+    manual_update_check_done = Signal(bool, str)  # (is_latest, message)
     api_probe_done = Signal(bool, str)   # (online, mode)
     worker_done = Signal(int, bool, str, str)  # 合成完成 (seq, success, message, save_path)
 
@@ -139,6 +140,7 @@ class MamboTTSApp(QMainWindow):
         self.log_line.connect(self._on_log_line)
         self.engine_log_line.connect(self._append_engine_log_line)
         self.update_found.connect(self._show_update_dialog)
+        self.manual_update_check_done.connect(self._on_manual_update_check_done)
         self.api_probe_done.connect(self._on_api_probe_done)
         self.worker_done.connect(self.on_generate_finished)
 
@@ -183,33 +185,54 @@ class MamboTTSApp(QMainWindow):
     def _on_log_line(self, level, message):
         self.append_log(level, message)
 
-    def _check_for_updates_async(self):
-        """在后台线程中检查 GitHub 是否有新版本；结果经信号回到主线程弹窗。"""
+    def _check_for_updates_async(self, manual=False):
+        """在后台线程中检查是否有新版本；结果经信号回到主线程更新横幅与对话框。"""
         def _check():
-            try:
-                resp = requests.get(
-                    f"https://api.github.com/repos/{GITHUB_REPO}/releases/latest",
-                    timeout=5,
-                    headers={"Accept": "application/vnd.github.v3+json"}
-                )
-                if resp.status_code == 200:
-                    data = resp.json()
-                    latest_tag = data.get("tag_name", "")
-                    release_url = data.get("html_url", "")
-                    if latest_tag and self._is_newer_version(latest_tag, CURRENT_VERSION):
-                        self.update_found.emit(latest_tag, release_url)
-            except Exception as e:
-                # 静默失败也要留一行线索：用户不至于完全不知道发生过更新检查
-                self.log_line.emit("INFO", f"检查更新未完成（{type(e).__name__}），不影响使用。")
+            latest_version = None
+            release_url = f"https://github.com/{GITHUB_REPO}"
+            release_notes = ""
+
+            urls = [
+                "https://pub-a620c95840e14c5da4be27858c45770f.r2.dev/version.json",
+                f"https://raw.githubusercontent.com/{GITHUB_REPO}/main/version.json",
+                f"https://api.github.com/repos/{GITHUB_REPO}/releases/latest",
+            ]
+
+            for url in urls:
+                try:
+                    resp = requests.get(url, timeout=4, headers={"Accept": "application/json"})
+                    if resp.status_code == 200:
+                        data = resp.json()
+                        if isinstance(data, dict):
+                            if "version" in data:
+                                latest_version = data.get("version", "").strip()
+                                release_url = data.get("download_url") or data.get("github_url") or release_url
+                                release_notes = data.get("release_notes", "")
+                                break
+                            elif "tag_name" in data:
+                                latest_version = data.get("tag_name", "").strip()
+                                release_url = data.get("html_url", release_url)
+                                release_notes = data.get("body", "")
+                                break
+                except Exception:
+                    continue
+
+            if latest_version and self._is_newer_version(latest_version, CURRENT_VERSION):
+                self.update_found.emit(latest_version, release_url, release_notes)
+            else:
+                if manual:
+                    self.log_line.emit("INFO", f"当前已是最新版本 (v{CURRENT_VERSION})，暂无更新。")
+                    self.manual_update_check_done.emit(True, f"当前已是最新版本 (v{CURRENT_VERSION})")
+                else:
+                    self.log_line.emit("INFO", f"更新检查完成：当前版本 v{CURRENT_VERSION} 为最新。")
 
         threading.Thread(target=_check, daemon=True).start()
 
     def _is_newer_version(self, latest, current):
-        """比较版本号，如 v1.2.0 > v1.1.0；预发布 tag（v1.3.0-beta 等）
-        先剥离 '-' 后缀再比较数字段，避免尾段被 isdigit 过滤导致比较失真。"""
+        """比较版本号，如 0.1.2 > 0.1.1；预发布 tag 先剥离 '-' 后缀再比较数字段"""
         def parse(v):
-            v = v.lstrip('v').strip()
-            v = v.split('-')[0].split('+')[0]  # 剥离预发布/构建元数据
+            v = str(v).lstrip('v').strip()
+            v = v.split('-')[0].split('+')[0]
             parts = v.split('.')
             return [int(p) for p in parts if p.isdigit()]
         try:
@@ -223,15 +246,25 @@ class MamboTTSApp(QMainWindow):
         except Exception:
             return False
 
-    def _show_update_dialog(self, latest_tag, release_url):
-        """显示新版本更新提示对话框（主线程槽函数）"""
+    def _on_manual_update_check_done(self, is_latest, msg):
+        QMessageBox.information(self, "检查更新", msg)
+
+    def _show_update_dialog(self, latest_tag, release_url, release_notes=""):
+        """显示新版本更新提示对话框与更新横幅（主线程槽函数）"""
+        self._target_release_url = release_url
+        if hasattr(self, "update_banner"):
+            self.update_banner.setVisible(True)
+            note_line = release_notes.replace('\n', ' ')[:50] if release_notes else ""
+            self.lbl_update_info.setText(f"[新版本可用] 检测到 MamboTTS 新版本 v{latest_tag}！{note_line}")
+
+        notes_display = f"\n\n更新说明：\n{release_notes}" if release_notes else ""
         reply = QMessageBox.question(
             self,
             "发现新版本",
-            f"MamboTTS 有新版本可用！\n\n"
-            f"当前版本: {CURRENT_VERSION}\n"
-            f"最新版本: {latest_tag}\n\n"
-            f"是否前往 GitHub 下载新版本？",
+            f"MamboTTS 发现新版本！\n\n"
+            f"当前版本: v{CURRENT_VERSION}\n"
+            f"最新版本: v{latest_tag}{notes_display}\n\n"
+            f"是否立即前往下载更新？",
             QMessageBox.Yes | QMessageBox.No, QMessageBox.Yes
         )
         if reply == QMessageBox.Yes and release_url:
@@ -649,7 +682,7 @@ class MamboTTSApp(QMainWindow):
     # ============ UI ============
 
     def init_ui(self):
-        self.setWindowTitle("MamboTTS - 曼波配音工具")
+        self.setWindowTitle(f"MamboTTS - 曼波配音工具 (v{CURRENT_VERSION})")
         self.resize(1280, 800)
         self.setMinimumSize(960, 600)
 
@@ -684,13 +717,22 @@ class MamboTTSApp(QMainWindow):
         header_title = QLabel("MamboTTS")
         header_title.setObjectName("HeaderTitle")
         # 样式由 base_qss 的 #HeaderTitle 控制（随主题切换）
-        header_subtitle = QLabel('本地专属"曼波"文字转语音配音助手')
+        header_subtitle = QLabel(f'本地专属"曼波"文字转语音配音助手  [版本: v{CURRENT_VERSION}]')
         header_subtitle.setObjectName("HeaderSub")
         # 样式由 base_qss 的 #HeaderSub 控制（随主题切换）
         header_left.addWidget(header_title)
         header_left.addWidget(header_subtitle)
         header_layout.addLayout(header_left)
         header_layout.addStretch()
+
+        # 检查更新按钮
+        self.btn_check_update = QPushButton(f"检查更新 (v{CURRENT_VERSION})")
+        self.btn_check_update.setObjectName("SecondaryBtn")
+        self.btn_check_update.setFixedHeight(30)
+        self.btn_check_update.setCursor(Qt.PointingHandCursor)
+        self.btn_check_update.setToolTip("检查是否有 0.1.x 最新版本更新")
+        self.btn_check_update.clicked.connect(lambda: self._check_for_updates_async(manual=True))
+        header_layout.addWidget(self.btn_check_update, 0, Qt.AlignVCenter)
 
         # 达芬奇配音插件唤起按钮
         self.btn_davinci = QPushButton("唤起达芬奇插件")
@@ -710,6 +752,42 @@ class MamboTTSApp(QMainWindow):
         self._update_theme_button_text()
         header_layout.addWidget(self.btn_theme, 0, Qt.AlignVCenter)
         root_layout.addWidget(header_card)
+
+        # 1.1 动态更新提示栏 (默认隐藏，检测到新版本时展示)
+        self.update_banner = QFrame()
+        self.update_banner.setObjectName("UpdateBanner")
+        self.update_banner.setStyleSheet("""
+            QFrame#UpdateBanner {
+                background-color: #1E293B;
+                border: 1px solid #3B82F6;
+                border-radius: 6px;
+            }
+        """)
+        self.update_banner.setVisible(False)
+        banner_layout = QHBoxLayout(self.update_banner)
+        banner_layout.setContentsMargins(14, 8, 14, 8)
+        banner_layout.setSpacing(10)
+
+        self.lbl_update_info = QLabel("发现新版本！")
+        self.lbl_update_info.setStyleSheet("color: #60A5FA; font-weight: bold; font-size: 13px;")
+        banner_layout.addWidget(self.lbl_update_info, 1)
+
+        self.btn_download_update = QPushButton("立即前往下载更新")
+        self.btn_download_update.setObjectName("PrimaryBtn")
+        self.btn_download_update.setFixedHeight(28)
+        self.btn_download_update.setCursor(Qt.PointingHandCursor)
+        self.btn_download_update.setStyleSheet("background-color: #2563EB; color: #FFFFFF; font-weight: bold; padding: 4px 14px; border-radius: 4px;")
+        self.btn_download_update.clicked.connect(lambda: webbrowser.open(getattr(self, "_target_release_url", f"https://github.com/{GITHUB_REPO}")))
+        banner_layout.addWidget(self.btn_download_update)
+
+        self.btn_dismiss_update = QPushButton("稍后再说")
+        self.btn_dismiss_update.setObjectName("SecondaryBtn")
+        self.btn_dismiss_update.setFixedHeight(28)
+        self.btn_dismiss_update.setCursor(Qt.PointingHandCursor)
+        self.btn_dismiss_update.clicked.connect(lambda: self.update_banner.setVisible(False))
+        banner_layout.addWidget(self.btn_dismiss_update)
+
+        root_layout.addWidget(self.update_banner)
 
         # 2. 内容区域：左右分栏
         content_layout = QHBoxLayout()
